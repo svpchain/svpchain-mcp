@@ -225,9 +225,26 @@ if [[ "$INDEXER_OK" -eq 1 ]]; then
   BIDS=$(jq -r '.result.structuredContent.orderbook.bids | length' <<<"$OB")
   ASKS=$(jq -r '.result.structuredContent.orderbook.asks | length' <<<"$OB")
   pass "bids=$BIDS asks=$ASKS"
+
+  # v0.2.1 read-catalog smoke (sampled — full sweep would bloat this script).
+  step "get_candles ($TICKER, 1MIN, limit=5)"
+  CD=$(mcp_call 100 "get_candles" "{\"ticker\":\"$TICKER\",\"resolution\":\"1MIN\",\"limit\":5}")
+  NC=$(jq -r '.result.structuredContent.candles.candles | length' <<<"$CD")
+  pass "candles=$NC"
+
+  step "get_fills (owner=$OWNER_ADDR, subaccount=0)"
+  FL=$(mcp_call 101 "get_fills" "{\"address\":\"$OWNER_ADDR\",\"subaccount_number\":0}")
+  NF=$(jq -r '.result.structuredContent.fills.fills | length' <<<"$FL")
+  pass "fills=$NF"
+
+  step "get_pnl (owner=$OWNER_ADDR, subaccount=0)"
+  PN=$(mcp_call 102 "get_pnl" "{\"address\":\"$OWNER_ADDR\",\"subaccount_number\":0}")
+  NP=$(jq -r '.result.structuredContent.pnl.historicalPnl | length' <<<"$PN")
+  pass "pnl entries=$NP"
 else
   TICKER="BTC-USD"
   info "indexer skipped; using TICKER=$TICKER for the build step"
+  info "v0.2.1 read-catalog smoke (candles/fills/pnl) skipped along with indexer"
 fi
 
 step "get_live_subaccount (chain, no indexer needed)"

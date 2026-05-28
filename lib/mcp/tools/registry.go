@@ -42,6 +42,37 @@ func Register(srv *mcp.Server, h *Handlers) {
 		Description: "Fetch the on-chain oracle price for a market by its prices-module id.",
 	}, h.GetOraclePrice)
 
+	// v0.2.1 market-data extensions.
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_candles",
+		Description: "Fetch OHLC candles for a perpetual market at the requested resolution.",
+	}, h.GetCandles)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_trades",
+		Description: "Fetch recent trades on a perpetual market.",
+	}, h.GetTrades)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_sparklines",
+		Description: "Fetch sparkline price series for every perpetual market over a fixed time period.",
+	}, h.GetSparklines)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_historical_funding",
+		Description: "Fetch historical funding rate samples for a perpetual market.",
+	}, h.GetHistoricalFunding)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_height",
+		Description: "Fetch the latest block height indexed by Comlink (with the matching block time).",
+	}, h.GetHeight)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_time",
+		Description: "Fetch the indexer's wall-clock time — useful as a freshness sentinel.",
+	}, h.GetTime)
+
 	// B. Account / positions.
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "get_subaccount",
@@ -57,6 +88,42 @@ func Register(srv *mcp.Server, h *Handlers) {
 		Name:        "whoami",
 		Description: "Return the calling tenant's identity, allowed subaccounts, broadcast mode, and kill-switch state.",
 	}, h.Whoami)
+
+	// v0.2.1 owner-scoped read extensions.
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_orders",
+		Description: "List orders for a (owner, subaccount) with optional status/side/type filters.",
+	}, h.GetOrders)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_order",
+		Description: "Fetch a single order by its on-chain order id.",
+	}, h.GetOrder)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_fills",
+		Description: "List fills for a (owner, subaccount), optionally filtered by market.",
+	}, h.GetFills)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_transfers",
+		Description: "List transfers (deposits, withdrawals, subaccount-to-subaccount) for a (owner, subaccount).",
+	}, h.GetTransfers)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_pnl",
+		Description: "Fetch the latest PnL snapshot for a (owner, subaccount).",
+	}, h.GetPnl)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_historical_pnl",
+		Description: "Fetch the PnL time-series for a (owner, subaccount).",
+	}, h.GetHistoricalPnl)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_funding_payments",
+		Description: "List historical funding payments for a (owner, subaccount).",
+	}, h.GetFundingPayments)
 
 	// C. Trading (build only — no signing).
 	mcp.AddTool(srv, &mcp.Tool{
