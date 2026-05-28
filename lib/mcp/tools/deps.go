@@ -1,0 +1,50 @@
+package tools
+
+import (
+	"cosmossdk.io/log"
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/policy"
+)
+
+// ChainDeps groups the gRPC clients used by tool handlers.
+type ChainDeps struct {
+	Account         chain.AccountClient
+	Broadcast       chain.BroadcastClient
+	ClobQuery       chain.ClobQueryClient
+	SubaccountQuery chain.SubaccountQueryClient
+	PricesQuery     chain.PricesQueryClient
+	CometBft        chain.CometBftClient
+}
+
+// Deps is the full dependency bundle every tool handler receives. v0.1
+// keeps it flat; v0.2 may split into smaller per-capability bundles when
+// the handler count grows.
+type Deps struct {
+	Chain   ChainDeps
+	Indexer *indexer.Client
+	Markets *markets.Cache
+	Builder *builder.Assembler
+
+	Policy      *policy.Engine
+	Auditor     *policy.Auditor
+	Idempotency *policy.Idempotency
+	RateLimit   *policy.RateLimiter
+
+	Logger log.Logger
+
+	// InterfaceRegistry is used by broadcast_signed_tx to decode the
+	// signer pubkey (eth_secp256k1) carried inside the TxRaw's AuthInfo,
+	// and to verify the resulting bech32 address matches the tenant's
+	// configured owner.
+	InterfaceRegistry codectypes.InterfaceRegistry
+
+	// BroadcastMode reports which broadcast variant is configured (for
+	// whoami). v0.1 always "server" — server broadcasts the signed tx
+	// the client returns.
+	BroadcastMode string
+}
