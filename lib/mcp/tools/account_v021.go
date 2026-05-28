@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -56,6 +58,13 @@ func (h *Handlers) GetOrders(
 	}
 	out, err := h.Deps.Indexer.GetOrders(ctx, in.Address, in.SubaccountNumber, filters)
 	if err != nil {
+		if errors.Is(err, indexer.ErrNotFound) {
+			// Fresh subaccount with no open orders — indexer returns 404
+			// rather than an empty list. Surface as an empty result.
+			// Non-nil empty slice: encoding/json marshals nil as `null`
+			// but the MCP SDK's reflection-derived schema requires `array`.
+			return nil, GetOrdersOutput{Orders: []indexer.Order{}}, nil
+		}
 		return nil, GetOrdersOutput{}, err
 	}
 	return nil, GetOrdersOutput{Orders: out}, nil
@@ -188,6 +197,11 @@ func (h *Handlers) GetPnl(
 	}
 	resp, err := h.Deps.Indexer.GetPnl(ctx, in.Address, in.SubaccountNumber)
 	if err != nil {
+		if errors.Is(err, indexer.ErrNotFound) {
+			return nil, GetPnlOutput{Pnl: indexer.PnlResponse{
+				HistoricalPnl: []json.RawMessage{},
+			}}, nil
+		}
 		return nil, GetPnlOutput{}, err
 	}
 	return nil, GetPnlOutput{Pnl: *resp}, nil
@@ -221,6 +235,11 @@ func (h *Handlers) GetHistoricalPnl(
 	}
 	resp, err := h.Deps.Indexer.GetHistoricalPnl(ctx, in.Address, in.SubaccountNumber)
 	if err != nil {
+		if errors.Is(err, indexer.ErrNotFound) {
+			return nil, GetHistoricalPnlOutput{HistoricalPnl: indexer.HistoricalPnlResponse{
+				HistoricalPnl: []json.RawMessage{},
+			}}, nil
+		}
 		return nil, GetHistoricalPnlOutput{}, err
 	}
 	return nil, GetHistoricalPnlOutput{HistoricalPnl: *resp}, nil
@@ -254,6 +273,11 @@ func (h *Handlers) GetFundingPayments(
 	}
 	resp, err := h.Deps.Indexer.GetFundingPayments(ctx, in.Address, in.SubaccountNumber)
 	if err != nil {
+		if errors.Is(err, indexer.ErrNotFound) {
+			return nil, GetFundingPaymentsOutput{FundingPayments: indexer.FundingPaymentsResponse{
+				FundingPayments: []json.RawMessage{},
+			}}, nil
+		}
 		return nil, GetFundingPaymentsOutput{}, err
 	}
 	return nil, GetFundingPaymentsOutput{FundingPayments: *resp}, nil

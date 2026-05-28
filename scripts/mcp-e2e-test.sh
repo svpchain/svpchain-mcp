@@ -367,11 +367,13 @@ if [[ "$INDEXER_OK" -eq 1 ]]; then
   NF=$(jq -r '.result.structuredContent.fills.fills | length' <<<"$FL")
   pass "fills=$NF"
 
-  # NOTE: get_pnl is intentionally skipped from the smoke pass — the
-  # indexer's /v4/pnl returns 404 (not an empty list) for subaccounts that
-  # have never traded, which surfaces as a tool error. v0.2.2 will
-  # translate indexer 404 → empty response for these reads; until then,
-  # we exercise get_pnl only on subaccounts that already have history.
+  step "get_pnl (owner=$OWNER_ADDR, subaccount=0)"
+  PN=$(mcp_call 102 "get_pnl" "{\"address\":\"$OWNER_ADDR\",\"subaccount_number\":0}")
+  # Empty result is the expected outcome on a fresh subaccount — the
+  # indexer's 404 is now translated to an empty PnlResponse by the
+  # account_v021 handler (see lib/mcp/tools/account_v021.go GetPnl).
+  NP=$(jq -r '.result.structuredContent.pnl.historicalPnl | length // 0' <<<"$PN")
+  pass "pnl entries=$NP"
 else
   TICKER="BTC-USD"
   info "indexer skipped; using TICKER=$TICKER for the build step"
@@ -384,8 +386,18 @@ LS_OWNER=$(jq -r '.result.structuredContent.subaccount.id.owner' <<<"$LS")
 [[ "$LS_OWNER" == "$OWNER_ADDR" ]] || fail "get_live_subaccount owner mismatch"
 pass "subaccount.id.owner=$LS_OWNER"
 
-step "build_place_limit_order ($TICKER, BUY 0.001 @ 1.00, good_til_block=+20)"
-GOOD_TIL=$((HEIGHT + 20))
+# Re-query height now — HEIGHT captured during prereqs is many seconds
+# stale by this point (MCP handshake, tools/list, 10+ read tools).
+# Valid range for short-term GoodTilBlock is [current, current+40] —
+# +40 is the chain's ShortBlockWindow constant. We pick +25 to leave
+# room on both bounds: well within the upper limit even if the chain
+# advances a few blocks between this fetch and DeliverTx, and well
+# above the lower limit even if build/sign/broadcast burns some seconds.
+SHORT_BLOCK_WINDOW_BUFFER=25
+FRESH_HEIGHT=$(curl -fsS "$COMET_RPC_URL/status" \
+                | jq -r .result.sync_info.latest_block_height)
+GOOD_TIL=$((FRESH_HEIGHT + SHORT_BLOCK_WINDOW_BUFFER))
+step "build_place_limit_order ($TICKER, BUY 0.001 @ 1.00, good_til_block=$GOOD_TIL [height=$FRESH_HEIGHT + $SHORT_BLOCK_WINDOW_BUFFER])"
 PAYLOAD_UUID="e2e-$(date +%s)-$$"
 BPL=$(mcp_call 7 "build_place_limit_order" "$(jq -nc \
   --argjson sub 0 --arg ticker "$TICKER" --arg side BUY \

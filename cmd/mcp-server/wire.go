@@ -48,7 +48,7 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 
 	// Indexer + markets cache.
 	idx := indexer.NewClient(cfg.IndexerBaseURL, indexer.Options{})
-	mkts := markets.NewCache(idx, time.Duration(cfg.Cache.MarketsRefresh), logger)
+	mkts := markets.NewCache(idx, chainDeps.ClobQuery, time.Duration(cfg.Cache.MarketsRefresh), logger)
 
 	// Policy: build per-tenant table and the bearer-token lookup tables
 	// the auth middleware uses.

@@ -3,12 +3,14 @@ package markets
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
 
 	"cosmossdk.io/log"
 
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
 )
 
@@ -28,8 +30,20 @@ type MarketMeta struct {
 // Cache is a periodically-refreshed in-memory snapshot of market metadata
 // keyed by ticker. Reads (ResolveTicker) are lock-free in the common
 // case via sync.RWMutex.
+//
+// Refresh joins two sources:
+//   - chain.ClobQueryClient.ClobPairAll — authoritative set of valid
+//     clob_pair_id values. Any indexer entry whose clob_pair_id is not in
+//     this set is dropped (with a logged warning), so the MCP server is
+//     resilient to indexer ticker→clobPairId drift.
+//   - indexer.Client.ListPerpetualMarkets — human ticker strings + the
+//     unit-conversion constants (atomicResolution, stepBaseQuantums,
+//     subticksPerTick, quantumConversionExponent). The chain has these
+//     too, but they're spread across clob/perpetuals/prices and need
+//     more queries; the indexer pre-joins them.
 type Cache struct {
 	indexer      *indexer.Client
+	clobQuery    chain.ClobQueryClient
 	refreshEvery time.Duration
 	logger       log.Logger
 
@@ -38,13 +52,16 @@ type Cache struct {
 }
 
 // NewCache returns a Cache that refreshes every `refresh` (defaults to 60s
-// when zero).
-func NewCache(idx *indexer.Client, refresh time.Duration, logger log.Logger) *Cache {
+// when zero). clobQuery may be nil for tests that exercise only the
+// indexer path; production callers (cmd/mcp-server/wire.go) always pass
+// a real chain client.
+func NewCache(idx *indexer.Client, clobQuery chain.ClobQueryClient, refresh time.Duration, logger log.Logger) *Cache {
 	if refresh == 0 {
 		refresh = 60 * time.Second
 	}
 	return &Cache{
 		indexer:      idx,
+		clobQuery:    clobQuery,
 		refreshEvery: refresh,
 		logger:       logger,
 		byTicker:     make(map[string]MarketMeta),
@@ -73,14 +90,34 @@ func (c *Cache) Run(ctx context.Context) error {
 	}
 }
 
-// Refresh fetches all markets from the indexer and atomically swaps the
-// in-memory table.
+// Refresh joins the chain's authoritative ClobPair set with the indexer's
+// ticker + conversion metadata, then atomically swaps the in-memory table.
+//
+// Entries the indexer knows about but the chain does not (stale indexer
+// state — what bit us in the first end-to-end run) are dropped, with the
+// dropped tickers logged for diagnostics.
 func (c *Cache) Refresh(ctx context.Context) error {
+	// Source of truth for valid clob_pair_id values. nil clobQuery is
+	// permitted for tests; we just skip the filter in that mode.
+	var validIDs map[uint32]struct{}
+	if c.clobQuery != nil {
+		chainPairs, err := c.clobQuery.ClobPairAll(ctx)
+		if err != nil {
+			return fmt.Errorf("clob.Query/ClobPairAll: %w", err)
+		}
+		validIDs = make(map[uint32]struct{}, len(chainPairs))
+		for _, p := range chainPairs {
+			validIDs[p.Id] = struct{}{}
+		}
+	}
+
 	resp, err := c.indexer.ListPerpetualMarkets(ctx)
 	if err != nil {
 		return fmt.Errorf("ListPerpetualMarkets: %w", err)
 	}
+
 	next := make(map[string]MarketMeta, len(resp.Markets))
+	var dropped []string
 	for ticker, m := range resp.Markets {
 		// ClobPairID is a uint32 on-chain but the indexer returns it as a
 		// string for JS-precision safety.
@@ -89,6 +126,12 @@ func (c *Cache) Refresh(ctx context.Context) error {
 			c.logger.Error("market has invalid clobPairId; skipping",
 				"ticker", ticker, "value", m.ClobPairID)
 			continue
+		}
+		if validIDs != nil {
+			if _, ok := validIDs[uint32(clobPairID)]; !ok {
+				dropped = append(dropped, ticker)
+				continue
+			}
 		}
 		next[ticker] = MarketMeta{
 			Ticker:                    ticker,
@@ -99,6 +142,12 @@ func (c *Cache) Refresh(ctx context.Context) error {
 			SubticksPerTick:           m.SubticksPerTick,
 		}
 	}
+	if len(dropped) > 0 {
+		sort.Strings(dropped) // stable log output
+		c.logger.Info("markets cache: dropped indexer entries not present on chain",
+			"tickers", dropped)
+	}
+
 	c.mu.Lock()
 	c.byTicker = next
 	c.mu.Unlock()

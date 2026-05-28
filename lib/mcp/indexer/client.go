@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,14 @@ import (
 
 	"golang.org/x/time/rate"
 )
+
+// ErrNotFound is returned by get() when the indexer responds 404. Callers
+// for endpoints where "not found" is a legitimate empty result — e.g.
+// /v4/pnl for a subaccount that has never traded — should check with
+// errors.Is and translate to a zero-valued response. Endpoints where 404
+// genuinely is an error (a typo'd ticker on /v4/orderbooks/...) should
+// continue to propagate it.
+var ErrNotFound = errors.New("indexer: not found")
 
 // Client talks to the svpchain Indexer's Comlink REST API (/v4/*). It is
 // intentionally small: only the endpoints used by MCP tools are exposed,
@@ -85,6 +94,12 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		// Surface as a sentinel so callers can decide whether 404 is a
+		// real error or an expected "empty" condition (see ErrNotFound
+		// comment above).
+		return ErrNotFound
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("GET %s: status %d: %s", endpoint, resp.StatusCode, strings.TrimSpace(string(body)))
