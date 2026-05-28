@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"strconv"
 	"testing"
 	"time"
@@ -43,7 +44,7 @@ func newSyntheticPayload(t *testing.T, signerAddr string) *payload.TxPayload {
 		AccountNumber:   "42",
 		Sequence:        "17",
 		IsShortTermCLOB: true,
-		TxBodyBytesB64:  bodyBytes,
+		TxBodyBytesB64:  base64.StdEncoding.EncodeToString(bodyBytes),
 		Fee: payload.Fee{
 			GasLimit: "1000000",
 			Amount:   []payload.Coin{},
@@ -65,10 +66,15 @@ func TestSign_RoundTripDecode(t *testing.T) {
 	require.NotEmpty(t, signed.PubKeyB64)
 
 	var raw txtypes.TxRaw
-	require.NoError(t, proto.Unmarshal(signed.TxRawBytesB64, &raw))
+	rawBytes, err := base64.StdEncoding.DecodeString(signed.TxRawBytesB64)
+	require.NoError(t, err)
+	require.NoError(t, proto.Unmarshal(rawBytes, &raw))
 
 	// TxBody bytes inside the signed tx must equal what devsign was given.
-	require.Equal(t, p.TxBodyBytesB64, raw.BodyBytes, "TxBody must round-trip unchanged")
+	// TxPayload carries TxBody as a base64 string; decode for comparison.
+	wantBody, err := base64.StdEncoding.DecodeString(p.TxBodyBytesB64)
+	require.NoError(t, err)
+	require.Equal(t, wantBody, raw.BodyBytes, "TxBody must round-trip unchanged")
 
 	// AuthInfo must carry our signer's sequence + a single SignerInfo.
 	var ai txtypes.AuthInfo
@@ -85,7 +91,9 @@ func TestSign_RoundTripDecode(t *testing.T) {
 
 	// One signature is present.
 	require.Len(t, raw.Signatures, 1)
-	require.Equal(t, signed.SignatureB64, raw.Signatures[0])
+	wantSig, err := base64.StdEncoding.DecodeString(signed.SignatureB64)
+	require.NoError(t, err)
+	require.Equal(t, wantSig, raw.Signatures[0])
 }
 
 func TestSign_SignatureVerifies(t *testing.T) {
@@ -99,7 +107,9 @@ func TestSign_SignatureVerifies(t *testing.T) {
 	// Recompute the sign-bytes from the signed tx's own AuthInfo + TxBody
 	// (the verifier side) and confirm the signature checks out.
 	var raw txtypes.TxRaw
-	require.NoError(t, proto.Unmarshal(signed.TxRawBytesB64, &raw))
+	rawBytes, err := base64.StdEncoding.DecodeString(signed.TxRawBytesB64)
+	require.NoError(t, err)
+	require.NoError(t, proto.Unmarshal(rawBytes, &raw))
 	accNum, _ := strconv.ParseUint(p.AccountNumber, 10, 64)
 	signBytes, err := payload.DirectSignBytes(raw.BodyBytes, raw.AuthInfoBytes, p.ChainID, accNum)
 	require.NoError(t, err)

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
@@ -44,10 +45,16 @@ func (h *Handlers) BroadcastSignedTx(
 		return nil, BroadcastSignedTxOutput{}, err
 	}
 
+	// Base64-decode the raw tx bytes (the field is a base64 string on the
+	// wire — see the comment on payload.SignedTx).
+	rawBytes, err := base64.StdEncoding.DecodeString(in.SignedTx.TxRawBytesB64)
+	if err != nil {
+		return nil, BroadcastSignedTxOutput{}, fmt.Errorf("decode tx_raw_bytes_b64: %w", err)
+	}
 	// Decode TxRaw + AuthInfo to verify the signer address matches the
 	// tenant's configured owner. Without this check, a tenant could submit
 	// a tx signed by some other key.
-	signerAddr, err := h.signerAddressFromTxRaw(in.SignedTx.TxRawBytesB64)
+	signerAddr, err := h.signerAddressFromTxRaw(rawBytes)
 	if err != nil {
 		return nil, BroadcastSignedTxOutput{}, fmt.Errorf("decode signed tx: %w", err)
 	}
@@ -62,7 +69,7 @@ func (h *Handlers) BroadcastSignedTx(
 		)
 	}
 
-	res, err := h.Deps.Chain.Broadcast.BroadcastSync(ctx, in.SignedTx.TxRawBytesB64)
+	res, err := h.Deps.Chain.Broadcast.BroadcastSync(ctx, rawBytes)
 	outcome := "broadcast"
 	if err != nil {
 		outcome = "chain_reject"

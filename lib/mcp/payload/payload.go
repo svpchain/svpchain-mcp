@@ -33,17 +33,22 @@ type TxPayload struct {
 	Sequence       string `json:"sequence"`
 	IsShortTermCLOB bool  `json:"is_short_term_clob"`
 
-	// Encoded transaction parts. Marshaled to base64 by encoding/json when
-	// serialized; the field-name suffix _b64 makes the wire shape explicit.
+	// Encoded transaction parts. Standard-base64 strings — the field-name
+	// suffix _b64 makes the wire shape explicit. We use `string` rather
+	// than `[]byte` because the MCP SDK's reflection-based JSON Schema
+	// generator turns []byte into {type:"array", items:{type:"integer"}},
+	// which doesn't match what encoding/json actually emits for []byte
+	// (a base64 string) — the SDK's output validator then rejects it.
+	// Callers encode/decode with base64.StdEncoding at the boundary.
 	//
 	// TxBodyBytesB64 is always set. AuthInfoBytesB64 and SignBytesB64 are
 	// pre-computed by the server only when the tenant config carries the
 	// signer's public key (v0.2+); when absent (v0.1), the local signer
 	// builds AuthInfo and computes sign-bytes itself using the chain id,
 	// account number, sequence, and fee carried in this payload.
-	TxBodyBytesB64   []byte `json:"tx_body_bytes_b64"`
-	AuthInfoBytesB64 []byte `json:"auth_info_bytes_b64,omitempty"`
-	SignBytesB64     []byte `json:"sign_bytes_b64,omitempty"`
+	TxBodyBytesB64   string `json:"tx_body_bytes_b64"`
+	AuthInfoBytesB64 string `json:"auth_info_bytes_b64,omitempty"`
+	SignBytesB64     string `json:"sign_bytes_b64,omitempty"`
 
 	Fee     Fee     `json:"fee"`
 	Summary Summary `json:"summary"`
@@ -104,12 +109,15 @@ type Summary struct {
 }
 
 // SignedTx is what broadcast_signed_tx receives from the MCP client. The
-// remote server decodes TxRawBytesB64 and verifies it matches the
-// TxPayload it originally built before broadcasting.
+// remote server base64-decodes TxRawBytesB64, decodes the TxRaw proto, and
+// verifies the signer address matches the tenant owner before broadcasting.
+//
+// All three fields are standard-base64 strings. See the comment on
+// TxPayload's TxBodyBytesB64 for why we use string rather than []byte.
 type SignedTx struct {
-	TxRawBytesB64 []byte `json:"tx_raw_bytes_b64"`
-	SignatureB64  []byte `json:"signature_b64"`
-	PubKeyB64     []byte `json:"pub_key_b64"`
+	TxRawBytesB64 string `json:"tx_raw_bytes_b64"`
+	SignatureB64  string `json:"signature_b64"`
+	PubKeyB64     string `json:"pub_key_b64"`
 }
 
 // BroadcastResult is the return shape of broadcast_signed_tx after a

@@ -1,6 +1,7 @@
 package payload_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 	"time"
@@ -18,9 +19,9 @@ func TestTxPayload_JSONRoundTrip(t *testing.T) {
 		AccountNumber:   "42",
 		Sequence:        "17",
 		IsShortTermCLOB: true,
-		TxBodyBytesB64:  []byte{0x01, 0x02, 0x03},
-		AuthInfoBytesB64: []byte{0x04, 0x05},
-		SignBytesB64:    []byte{0x06, 0x07, 0x08, 0x09},
+		TxBodyBytesB64:   base64.StdEncoding.EncodeToString([]byte{0x01, 0x02, 0x03}),
+		AuthInfoBytesB64: base64.StdEncoding.EncodeToString([]byte{0x04, 0x05}),
+		SignBytesB64:     base64.StdEncoding.EncodeToString([]byte{0x06, 0x07, 0x08, 0x09}),
 		Fee: payload.Fee{
 			GasLimit: "1000000",
 			Amount:   []payload.Coin{},

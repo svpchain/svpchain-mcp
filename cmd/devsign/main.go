@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -153,7 +154,13 @@ func sign(priv *ethsecp256k1.PrivKey, p *payload.TxPayload) (*payload.SignedTx, 
 		return nil, fmt.Errorf("marshal AuthInfo: %w", err)
 	}
 
-	signBytes, err := payload.DirectSignBytes(p.TxBodyBytesB64, authInfoBytes, p.ChainID, accNum)
+	// TxPayload's TxBodyBytesB64 is a base64-encoded string on the wire
+	// (see the comment on payload.TxPayload). Decode it before signing.
+	bodyBytes, err := base64.StdEncoding.DecodeString(p.TxBodyBytesB64)
+	if err != nil {
+		return nil, fmt.Errorf("decode tx_body_bytes_b64: %w", err)
+	}
+	signBytes, err := payload.DirectSignBytes(bodyBytes, authInfoBytes, p.ChainID, accNum)
 	if err != nil {
 		return nil, fmt.Errorf("compute sign-bytes: %w", err)
 	}
@@ -163,7 +170,7 @@ func sign(priv *ethsecp256k1.PrivKey, p *payload.TxPayload) (*payload.SignedTx, 
 	}
 
 	txRaw := &txtypes.TxRaw{
-		BodyBytes:     p.TxBodyBytesB64,
+		BodyBytes:     bodyBytes,
 		AuthInfoBytes: authInfoBytes,
 		Signatures:    [][]byte{sig},
 	}
@@ -173,8 +180,8 @@ func sign(priv *ethsecp256k1.PrivKey, p *payload.TxPayload) (*payload.SignedTx, 
 	}
 
 	return &payload.SignedTx{
-		TxRawBytesB64: txRawBytes,
-		SignatureB64:  sig,
-		PubKeyB64:     pub.Bytes(),
+		TxRawBytesB64: base64.StdEncoding.EncodeToString(txRawBytes),
+		SignatureB64:  base64.StdEncoding.EncodeToString(sig),
+		PubKeyB64:     base64.StdEncoding.EncodeToString(pub.Bytes()),
 	}, nil
 }

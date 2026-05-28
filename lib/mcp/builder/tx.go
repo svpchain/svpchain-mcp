@@ -1,6 +1,7 @@
 package builder
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strconv"
 	"time"
@@ -66,7 +67,7 @@ func (a *Assembler) Assemble(args Args) (*payload.TxPayload, error) {
 		AccountNumber:   strconv.FormatUint(args.AccountNumber, 10),
 		Sequence:        strconv.FormatUint(args.Sequence, 10),
 		IsShortTermCLOB: IsShortTermClobMsgs(args.Msgs),
-		TxBodyBytesB64:  bodyBytes,
+		TxBodyBytesB64:  base64.StdEncoding.EncodeToString(bodyBytes),
 		Fee: payload.Fee{
 			GasLimit: strconv.FormatUint(ClobGasLimit, 10),
 			Amount:   []payload.Coin{}, // CLOB: empty
