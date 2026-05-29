@@ -24,7 +24,20 @@ type Config struct {
 
 	Auth    AuthConfig     `toml:"auth"`
 	Cache   CacheConfig    `toml:"cache"`
+	Limits  LimitsConfig   `toml:"limits"`
 	Tenants []TenantConfig `toml:"tenants"`
+}
+
+// LimitsConfig caps the size of funds movements. All values are in human
+// USDC. A zero value disables the corresponding check — useful for dev
+// configs that don't care about the safety rail. DailyWithdrawCapUSDC is
+// enforced per tenant_id; per-tenant overrides are deferred to a later
+// version.
+type LimitsConfig struct {
+	DepositMaxUSDC       uint64 `toml:"deposit_max_usdc"`
+	WithdrawMaxUSDC      uint64 `toml:"withdraw_max_usdc"`
+	TransferMaxUSDC      uint64 `toml:"transfer_max_usdc"`
+	DailyWithdrawCapUSDC uint64 `toml:"daily_withdraw_cap_usdc"`
 }
 
 type AuthConfig struct {
