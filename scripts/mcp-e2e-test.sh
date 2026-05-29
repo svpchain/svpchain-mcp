@@ -21,7 +21,7 @@
 #   INDEXER_BASE_URL=... ./scripts/mcp-e2e-test.sh # override indexer endpoint
 #
 # Exit codes:
-#   0 = all 10 tools verified end-to-end
+#   0 = full v0.1 + v0.2.1 + v0.2.2 + v0.2.3 tool set verified end-to-end
 #   non-zero = first failing step (output before exit shows what broke)
 #
 set -euo pipefail
@@ -280,11 +280,20 @@ mode = "bearer"
 [cache]
 markets_refresh = "30s"
 
+[limits]
+# v0.2.3 funds-tool caps. Sized so the positive phases below fit and the
+# negative phase ("over-cap deposit") exceeds the per-tx ceiling.
+deposit_max_usdc       = 1000
+withdraw_max_usdc      = 500
+transfer_max_usdc      = 500
+daily_withdraw_cap_usdc = 1000
+
 [[tenants]]
 tenant_id           = "e2e"
 bearer_token        = "$TENANT_TOKEN"
 owner               = "$OWNER_ADDR"
-allowed_subaccounts = [0]
+# Includes both 0 and 1 so the same-owner transfer phase has a destination.
+allowed_subaccounts = [0, 1]
 kill_switch         = false
 EOF
 pass "config written"
@@ -322,8 +331,8 @@ step "MCP initialize handshake"
 mcp_init
 
 # Expected tool count tracks the registry. v0.1 = 10, v0.2.1 = 23,
-# v0.2.2 = 27 (target), v0.2.3 = 30 (target).
-EXPECTED_TOOLS="${EXPECTED_TOOLS:-27}"
+# v0.2.2 = 27, v0.2.3 = 30 (funds tools + dual-enforcement broadcast).
+EXPECTED_TOOLS="${EXPECTED_TOOLS:-30}"
 step "tools/list (expecting ${EXPECTED_TOOLS} tools)"
 LIST=$(mcp_call 1 "tools/list")
 COUNT=$(jq -r '.result.tools | length' <<<"$LIST")
@@ -502,7 +511,86 @@ IS_SHORT_CN=$(jq -r '.is_short_term_clob' <<<"$CANCEL_PAYLOAD")
 [[ "$IS_SHORT_CN" == "true" ]] || fail "expected is_short_term_clob=true on cancel, got $IS_SHORT_CN"
 pass "cancel payload built; is_short_term_clob=true; client_id=$CANCEL_UUID"
 
-# ---- 8. summary -------------------------------------------------------------
+# ---- 8. v0.2.3 funds-tool round-trips ---------------------------------------
+# Deposit → Withdraw → Transfer: each phase goes through build → devsign →
+# broadcast. The negative phase fires only the build_* path (structured cap
+# rejection arrives before signing, so no chain involvement needed).
 
-step "All v0.1 + v0.2.1 + v0.2.2 tools verified end-to-end"
-printf "${C_GREEN}${C_BOLD}OK${C_RESET}  mcp-server v0.2.2 round-trip on chain_id=$CHAIN_ID\n"
+# Shared helper: build → devsign → broadcast a funds tool, fail if the
+# chain rejects (Code != 0). Args: TOOL_NAME, ARGS_JSON, CALL_ID, UUID.
+funds_round_trip() {
+  local tool="$1" args="$2" call_id="$3" uuid="$4"
+  local resp payload bcast tx_hash code raw_log
+  resp=$(mcp_call "$call_id" "$tool" "$args")
+  payload=$(jq -c '.result.structuredContent.payload' <<<"$resp")
+  [[ "$payload" != "null" ]] || { echo "$resp" | jq . >&2; fail "$tool returned no payload"; }
+  echo "$payload" > "$WORKDIR/${tool}.payload.json"
+  ./build/devsign --in "$WORKDIR/${tool}.payload.json" --out "$WORKDIR/${tool}.signed.json" \
+    || { cat "$WORKDIR/${tool}.payload.json" >&2; fail "devsign $tool"; }
+  local signed
+  signed=$(cat "$WORKDIR/${tool}.signed.json")
+  bcast=$(mcp_call "$((call_id + 1))" "broadcast_signed_tx" "$(jq -nc \
+    --arg cid "$uuid" --argjson stx "$signed" \
+    '{client_id: $cid, signed_tx: $stx}')")
+  tx_hash=$(jq -r '.result.structuredContent.result.tx_hash' <<<"$bcast")
+  code=$(jq -r '.result.structuredContent.result.code' <<<"$bcast")
+  if [[ "$code" != "0" ]]; then
+    raw_log=$(jq -r '.result.structuredContent.result.raw_log' <<<"$bcast")
+    fail "$tool broadcast rejected: code=$code raw_log=$raw_log"
+  fi
+  pass "$tool round-trip: tx_hash=$tx_hash"
+}
+
+step "build_deposit_to_subaccount (10 USDC, sub 0)"
+DEP_UUID="e2e-dep-$(date +%s)-$$"
+funds_round_trip "build_deposit_to_subaccount" \
+  "$(jq -nc --argjson sub 0 --arg amt "10" --arg pcid "$DEP_UUID" \
+     '{subaccount_number: $sub, human_usdc: $amt, payload_client_id: $pcid}')" \
+  200 "$DEP_UUID"
+
+step "build_withdraw_from_subaccount (3 USDC, sub 0 → bank)"
+WD_UUID="e2e-wd-$(date +%s)-$$"
+funds_round_trip "build_withdraw_from_subaccount" \
+  "$(jq -nc --argjson sub 0 --arg amt "3" --arg pcid "$WD_UUID" \
+     '{subaccount_number: $sub, human_usdc: $amt, payload_client_id: $pcid}')" \
+  210 "$WD_UUID"
+
+step "build_transfer_between_subaccounts (1 USDC, sub 0 → sub 1)"
+XF_UUID="e2e-xf-$(date +%s)-$$"
+funds_round_trip "build_transfer_between_subaccounts" \
+  "$(jq -nc --argjson s 0 --argjson r 1 --arg amt "1" --arg pcid "$XF_UUID" \
+     '{sender_subaccount_number: $s, recipient_subaccount_number: $r, human_usdc: $amt, payload_client_id: $pcid}')" \
+  220 "$XF_UUID"
+
+# ---- 9. v0.2.3 cap rejection (negative) -------------------------------------
+# build_deposit with 2000 USDC > deposit_max_usdc=1000. Expect the
+# structured cap rejection from limits.CheckPerTx — fires pre-sign so
+# there's no chain involvement.
+
+step "build_deposit_to_subaccount (2000 USDC > 1000 USDC cap, expect rejection)"
+OVER_UUID="e2e-over-$(date +%s)-$$"
+# Don't use mcp_call here — it fail()s on isError. Use raw curl so we can
+# assert the rejection ourselves.
+OVER_BODY=$(jq -nc \
+  --argjson sub 0 --arg amt "2000" --arg pcid "$OVER_UUID" \
+  '{jsonrpc:"2.0", id:230, method:"tools/call",
+    params:{name:"build_deposit_to_subaccount",
+            arguments:{subaccount_number:$sub, human_usdc:$amt, payload_client_id:$pcid}}}')
+OVER_RAW=$(curl -sS -H "Authorization: Bearer $TENANT_TOKEN" \
+                    -H "Content-Type: application/json" \
+                    -H "Accept: $MCP_ACCEPT" \
+                    -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION" \
+                    ${MCP_SESSION_ID:+-H "Mcp-Session-Id: $MCP_SESSION_ID"} \
+                    -d "$OVER_BODY" "http://$LISTEN_ADDR/")
+OVER_RESP=$(extract_json "$OVER_RAW")
+OVER_MSG=$(jq -r '.result.content[0].text // ""' <<<"$OVER_RESP")
+if [[ "$OVER_MSG" != *"deposit_max_usdc exceeded"* ]]; then
+  echo "$OVER_RESP" | jq . >&2
+  fail "expected 'deposit_max_usdc exceeded' in cap rejection, got: $OVER_MSG"
+fi
+pass "cap rejection surfaced: $OVER_MSG"
+
+# ---- 10. summary ------------------------------------------------------------
+
+step "All v0.1 + v0.2.1 + v0.2.2 + v0.2.3 tools verified end-to-end"
+printf "${C_GREEN}${C_BOLD}OK${C_RESET}  mcp-server v0.2.3 round-trip on chain_id=$CHAIN_ID\n"
