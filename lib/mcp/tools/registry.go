@@ -163,6 +163,11 @@ func Register(srv *mcp.Server, h *Handlers) {
 		Description: "Construct a withdraw from the owner's subaccount back into their bank account (USDC only). Per-tx cap + per-tenant daily cap enforced; broadcast_signed_tx re-checks the daily cap as a safety net.",
 	}, h.BuildWithdrawFromSubaccount)
 
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_transfer_between_subaccounts",
+		Description: "Construct a USDC transfer between two subaccounts under the same owner. v0.2.3 is same-owner only; cross-owner transfers are deferred until a future version with the right cap surface.",
+	}, h.BuildTransferBetweenSubaccounts)
+
 	// E. Cross-cutting.
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "broadcast_signed_tx",

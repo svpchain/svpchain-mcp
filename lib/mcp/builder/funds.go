@@ -81,6 +81,80 @@ func BuildDepositToSubaccount(
 	return msg, txPayload, nil
 }
 
+// -- build_transfer_between_subaccounts (same-owner only) --------------
+
+// TransferBetweenSubaccountsInput drives build_transfer_between_subaccounts.
+// v0.2.3 deliberately restricts this to same-owner transfers: the
+// recipient's owner field is implicit (equal to in.Owner), so the API
+// can't be used to move funds to a third party until a future version
+// adds the cap surface (allowlist + per-recipient ledger).
+type TransferBetweenSubaccountsInput struct {
+	Owner string
+
+	// Sender + Recipient subaccount numbers under the same Owner. Must be
+	// distinct or the chain rejects with ErrSenderSameAsRecipient.
+	SenderSubaccountNum    uint32
+	RecipientSubaccountNum uint32
+
+	HumanUSDC string
+
+	PayloadClientID string
+}
+
+// BuildTransferBetweenSubaccounts constructs a MsgCreateTransfer moving
+// USDC from one subaccount to another under the same owner. Cap
+// enforcement (per-tx only — no daily cap since funds stay in the
+// tenant's books) is the handler's responsibility.
+func BuildTransferBetweenSubaccounts(
+	in TransferBetweenSubaccountsInput,
+	asm *Assembler,
+	accountNumber, sequence uint64,
+) (*sendingtypes.MsgCreateTransfer, *payload.TxPayload, error) {
+	if in.SenderSubaccountNum == in.RecipientSubaccountNum {
+		return nil, nil, fmt.Errorf("sender_subaccount_number must differ from recipient_subaccount_number")
+	}
+	quantums, err := limits.HumanToQuantums(in.HumanUSDC)
+	if err != nil {
+		return nil, nil, fmt.Errorf("human_usdc: %w", err)
+	}
+	if quantums == 0 {
+		return nil, nil, fmt.Errorf("human_usdc must be > 0")
+	}
+
+	transfer := &sendingtypes.Transfer{
+		Sender:    satypes.SubaccountId{Owner: in.Owner, Number: in.SenderSubaccountNum},
+		Recipient: satypes.SubaccountId{Owner: in.Owner, Number: in.RecipientSubaccountNum},
+		AssetId:   assettypes.AssetUsdc.Id,
+		Amount:    quantums,
+	}
+	msg := sendingtypes.NewMsgCreateTransfer(transfer)
+	if err := msg.ValidateBasic(); err != nil {
+		return nil, nil, fmt.Errorf("MsgCreateTransfer.ValidateBasic: %w", err)
+	}
+
+	summary := payload.Summary{
+		ToolName:       "build_transfer_between_subaccounts",
+		MsgTypeURL:     "/dydxprotocol.sending.MsgCreateTransfer",
+		Subaccount:     payload.SubaccountRef{Owner: in.Owner, Number: in.SenderSubaccountNum},
+		AssetID:        assettypes.AssetUsdc.Id,
+		AmountHuman:    in.HumanUSDC,
+		RecipientOwner: in.Owner,
+		RecipientNum:   in.RecipientSubaccountNum,
+	}
+	txPayload, err := asm.Assemble(Args{
+		Msgs:          []sdk.Msg{msg},
+		SignerAddress: in.Owner,
+		AccountNumber: accountNumber,
+		Sequence:      sequence,
+		ClientID:      in.PayloadClientID,
+		Summary:       summary,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("assemble: %w", err)
+	}
+	return msg, txPayload, nil
+}
+
 // -- build_withdraw_from_subaccount ------------------------------------
 
 // WithdrawFromSubaccountInput drives build_withdraw_from_subaccount.

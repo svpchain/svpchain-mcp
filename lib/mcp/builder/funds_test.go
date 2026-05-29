@@ -76,6 +76,57 @@ func TestBuildWithdrawFromSubaccount_Rejects(t *testing.T) {
 	require.Contains(t, err.Error(), "> 0")
 }
 
+func TestBuildTransferBetweenSubaccounts_Happy(t *testing.T) {
+	msg, p, err := builder.BuildTransferBetweenSubaccounts(builder.TransferBetweenSubaccountsInput{
+		Owner:                  fundsTestOwner,
+		SenderSubaccountNum:    0,
+		RecipientSubaccountNum: 1,
+		HumanUSDC:              "10",
+		PayloadClientID:        "uuid-xfer-1",
+	}, newFundsAsm(t), 7, 17)
+	require.NoError(t, err)
+	require.Equal(t, fundsTestOwner, msg.Transfer.Sender.Owner)
+	require.Equal(t, uint32(0), msg.Transfer.Sender.Number)
+	require.Equal(t, fundsTestOwner, msg.Transfer.Recipient.Owner)
+	require.Equal(t, uint32(1), msg.Transfer.Recipient.Number)
+	require.EqualValues(t, 10_000_000, msg.Transfer.Amount)
+	require.Equal(t, "/dydxprotocol.sending.MsgCreateTransfer", p.Summary.MsgTypeURL)
+	require.Equal(t, fundsTestOwner, p.Summary.RecipientOwner)
+	require.Equal(t, uint32(1), p.Summary.RecipientNum)
+}
+
+func TestBuildTransferBetweenSubaccounts_Rejects(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      builder.TransferBetweenSubaccountsInput
+		wantErr string
+	}{
+		{
+			name: "sender == recipient (same subaccount num)",
+			in: builder.TransferBetweenSubaccountsInput{
+				Owner: fundsTestOwner, SenderSubaccountNum: 0, RecipientSubaccountNum: 0,
+				HumanUSDC: "1", PayloadClientID: "u",
+			},
+			wantErr: "must differ",
+		},
+		{
+			name: "zero amount",
+			in: builder.TransferBetweenSubaccountsInput{
+				Owner: fundsTestOwner, SenderSubaccountNum: 0, RecipientSubaccountNum: 1,
+				HumanUSDC: "0", PayloadClientID: "u",
+			},
+			wantErr: "> 0",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := builder.BuildTransferBetweenSubaccounts(tc.in, newFundsAsm(t), 1, 1)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
 func TestBuildDepositToSubaccount_Rejects(t *testing.T) {
 	cases := []struct {
 		name    string

@@ -147,3 +147,76 @@ func (h *Handlers) BuildWithdrawFromSubaccount(
 	}
 	return nil, BuildWithdrawFromSubaccountOutput{Payload: *p}, nil
 }
+
+// -- build_transfer_between_subaccounts (same-owner) -------------------
+
+type BuildTransferBetweenSubaccountsInput struct {
+	SenderSubaccountNumber    uint32 `json:"sender_subaccount_number"`
+	RecipientSubaccountNumber uint32 `json:"recipient_subaccount_number"`
+	HumanUSDC                 string `json:"human_usdc" jsonschema:"USDC amount in human units"`
+	PayloadClientID           string `json:"payload_client_id" jsonschema:"broadcast-idempotency uuid"`
+}
+
+type BuildTransferBetweenSubaccountsOutput struct {
+	Payload payload.TxPayload `json:"payload"`
+}
+
+func (h *Handlers) BuildTransferBetweenSubaccounts(
+	ctx context.Context,
+	_ *mcp.CallToolRequest,
+	in BuildTransferBetweenSubaccountsInput,
+) (*mcp.CallToolResult, BuildTransferBetweenSubaccountsOutput, error) {
+	tc, ok := TenantFrom(ctx)
+	if !ok {
+		return nil, BuildTransferBetweenSubaccountsOutput{}, ErrNoTenant
+	}
+	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
+		return nil, BuildTransferBetweenSubaccountsOutput{}, err
+	}
+	tp, err := h.Deps.Policy.Tenant(tc.TenantID)
+	if err != nil {
+		return nil, BuildTransferBetweenSubaccountsOutput{}, err
+	}
+	// BOTH subaccounts must be in the tenant's allowlist. Same-owner only:
+	// the builder uses tp.Owner for both sender and recipient.
+	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SenderSubaccountNumber); err != nil {
+		return nil, BuildTransferBetweenSubaccountsOutput{}, fmt.Errorf("sender: %w", err)
+	}
+	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.RecipientSubaccountNumber); err != nil {
+		return nil, BuildTransferBetweenSubaccountsOutput{}, fmt.Errorf("recipient: %w", err)
+	}
+	if !h.Deps.RateLimit.Allow("build_transfer_between_subaccounts:" + tc.TenantID) {
+		return nil, BuildTransferBetweenSubaccountsOutput{}, userErrf("rate limit exceeded")
+	}
+
+	// Per-tx cap only (no daily cap — funds stay in the tenant's books).
+	quantums, err := limits.HumanToQuantums(in.HumanUSDC)
+	if err != nil {
+		return nil, BuildTransferBetweenSubaccountsOutput{}, fmt.Errorf("human_usdc: %w", err)
+	}
+	if err := limits.CheckPerTx(h.Deps.Limits, limits.ToolTransfer, quantums); err != nil {
+		return nil, BuildTransferBetweenSubaccountsOutput{}, err
+	}
+
+	acc, err := h.Deps.Chain.Account.Account(ctx, tp.Owner)
+	if err != nil {
+		return nil, BuildTransferBetweenSubaccountsOutput{}, fmt.Errorf("read account state: %w", err)
+	}
+
+	_, p, err := builder.BuildTransferBetweenSubaccounts(
+		builder.TransferBetweenSubaccountsInput{
+			Owner:                  tp.Owner,
+			SenderSubaccountNum:    in.SenderSubaccountNumber,
+			RecipientSubaccountNum: in.RecipientSubaccountNumber,
+			HumanUSDC:              in.HumanUSDC,
+			PayloadClientID:        in.PayloadClientID,
+		},
+		h.Deps.Builder,
+		acc.AccountNumber,
+		acc.Sequence,
+	)
+	if err != nil {
+		return nil, BuildTransferBetweenSubaccountsOutput{}, err
+	}
+	return nil, BuildTransferBetweenSubaccountsOutput{Payload: *p}, nil
+}
