@@ -168,10 +168,14 @@ type BuildCancelOrderInput struct {
 
 	ClobPairID    uint32 `json:"clob_pair_id"`
 	OrderClientID uint32 `json:"order_client_id"`
-	OrderFlags    uint32 `json:"order_flags" jsonschema:"0=ShortTerm, 32=Conditional, 64=LongTerm — required, no inference"`
+	// NOTE: jsonschema tag value must NOT start with `WORD=` or contain
+	// bare comma-separated `key=value` tokens — the go-sdk's tag parser
+	// (mcp.AddTool) treats those as directives and panics at server start.
+	// Same applies to the two fields below.
+	OrderFlags uint32 `json:"order_flags" jsonschema:"flags value — short-term (0), conditional (32), long-term (64); required, no inference"`
 
-	GoodTilBlock     uint32 `json:"good_til_block,omitempty" jsonschema:"required when order_flags=0"`
-	GoodTilBlockTime uint32 `json:"good_til_block_time,omitempty" jsonschema:"required when order_flags=32 or 64"`
+	GoodTilBlock     uint32 `json:"good_til_block,omitempty" jsonschema:"only set when order_flags is 0 (short-term)"`
+	GoodTilBlockTime uint32 `json:"good_til_block_time,omitempty" jsonschema:"only set when order_flags is 32 (conditional) or 64 (long-term)"`
 
 	PayloadClientID string `json:"payload_client_id"`
 }
