@@ -49,6 +49,33 @@ func TestBuildDepositToSubaccount_FractionalUSDC(t *testing.T) {
 	require.EqualValues(t, 1_500_001, msg.Quantums)
 }
 
+func TestBuildWithdrawFromSubaccount_Happy(t *testing.T) {
+	msg, p, err := builder.BuildWithdrawFromSubaccount(builder.WithdrawFromSubaccountInput{
+		Owner:           fundsTestOwner,
+		SubaccountNum:   0,
+		HumanUSDC:       "50",
+		PayloadClientID: "uuid-wd-1",
+	}, newFundsAsm(t), 7, 17)
+	require.NoError(t, err)
+	require.Equal(t, fundsTestOwner, msg.Sender.Owner)
+	require.Equal(t, uint32(0), msg.Sender.Number)
+	require.Equal(t, fundsTestOwner, msg.Recipient)
+	require.Equal(t, assettypes.AssetUsdc.Id, msg.AssetId)
+	require.EqualValues(t, 50_000_000, msg.Quantums)
+	require.Equal(t, "/dydxprotocol.sending.MsgWithdrawFromSubaccount", p.Summary.MsgTypeURL)
+}
+
+func TestBuildWithdrawFromSubaccount_Rejects(t *testing.T) {
+	_, _, err := builder.BuildWithdrawFromSubaccount(builder.WithdrawFromSubaccountInput{
+		Owner:           fundsTestOwner,
+		SubaccountNum:   0,
+		HumanUSDC:       "0",
+		PayloadClientID: "u",
+	}, newFundsAsm(t), 1, 1)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "> 0")
+}
+
 func TestBuildDepositToSubaccount_Rejects(t *testing.T) {
 	cases := []struct {
 		name    string

@@ -158,6 +158,11 @@ func Register(srv *mcp.Server, h *Handlers) {
 		Description: "Construct a deposit from the owner's bank account into one of their subaccounts (USDC only on svpchain). Per-tx cap enforced if configured.",
 	}, h.BuildDepositToSubaccount)
 
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_withdraw_from_subaccount",
+		Description: "Construct a withdraw from the owner's subaccount back into their bank account (USDC only). Per-tx cap + per-tenant daily cap enforced; broadcast_signed_tx re-checks the daily cap as a safety net.",
+	}, h.BuildWithdrawFromSubaccount)
+
 	// E. Cross-cutting.
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "broadcast_signed_tx",

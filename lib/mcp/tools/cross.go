@@ -5,14 +5,19 @@ import (
 	"encoding/base64"
 	"fmt"
 
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	txtypes "github.com/cosmos/cosmos-sdk/types/tx"
 	"github.com/cosmos/gogoproto/proto"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/limits"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/policy"
+	assettypes "github.com/dydxprotocol/v4-chain/protocol/x/assets/types"
+	sendingtypes "github.com/dydxprotocol/v4-chain/protocol/x/sending/types"
 )
 
 // -- broadcast_signed_tx -----------------------------------------------
@@ -69,6 +74,22 @@ func (h *Handlers) BroadcastSignedTx(
 		)
 	}
 
+	// Dual-enforcement safety net: decode the TxBody, sum every USDC
+	// withdraw across all messages, and re-Enforce against the per-tenant
+	// daily ledger before we hit the wire. Catches the bypass where a
+	// caller hand-crafts an unsigned tx to skip the build_* checks. Also
+	// captures the per-tx delta so a successful broadcast records the
+	// matching spend.
+	withdrawQ, err := extractWithdrawQuantums(rawBytes, h.Deps.InterfaceRegistry)
+	if err != nil {
+		return nil, BroadcastSignedTxOutput{}, fmt.Errorf("inspect tx: %w", err)
+	}
+	if withdrawQ > 0 {
+		if err := limits.Enforce(h.Deps.Limits, h.Deps.WithdrawLedger, tc.TenantID, limits.ToolWithdraw, withdrawQ); err != nil {
+			return nil, BroadcastSignedTxOutput{}, err
+		}
+	}
+
 	res, err := h.Deps.Chain.Broadcast.BroadcastSync(ctx, rawBytes)
 	outcome := "broadcast"
 	if err != nil {
@@ -89,11 +110,60 @@ func (h *Handlers) BroadcastSignedTx(
 	if err != nil {
 		return nil, BroadcastSignedTxOutput{}, err
 	}
+	// AIMD fail-fast: parse "insufficient fee" out of RawLog and surface
+	// the chain's required min-gas-price as a typed error. The server
+	// never retries; the caller decides whether to bump and retry.
+	if res.Code != 0 {
+		if pe := chain.ParseBroadcastError(res); pe != nil {
+			return nil, BroadcastSignedTxOutput{}, pe
+		}
+	}
+	// Spend only after the chain accepts the broadcast — a failed CheckTx
+	// doesn't eat the tenant's daily cap.
+	if res.Code == 0 && withdrawQ > 0 && h.Deps.WithdrawLedger != nil {
+		h.Deps.WithdrawLedger.Record(tc.TenantID, withdrawQ)
+	}
 	return nil, BroadcastSignedTxOutput{Result: payload.BroadcastResult{
 		TxHash: res.TxHash,
 		Code:   res.Code,
 		RawLog: res.RawLog,
 	}}, nil
+}
+
+// extractWithdrawQuantums sums the USDC quantums of every
+// MsgWithdrawFromSubaccount in the tx body. Returns 0 if there are no
+// withdraws. Non-USDC withdraws are ignored — the chain rejects them in
+// ValidateBasic, and the cap is denominated in USDC anyway.
+func extractWithdrawQuantums(rawTxBytes []byte, reg codectypes.InterfaceRegistry) (uint64, error) {
+	var txRaw txtypes.TxRaw
+	if err := proto.Unmarshal(rawTxBytes, &txRaw); err != nil {
+		return 0, fmt.Errorf("unmarshal TxRaw: %w", err)
+	}
+	var body txtypes.TxBody
+	if err := proto.Unmarshal(txRaw.BodyBytes, &body); err != nil {
+		return 0, fmt.Errorf("unmarshal TxBody: %w", err)
+	}
+	var total uint64
+	for _, anyMsg := range body.Messages {
+		var msg sdk.Msg
+		if err := reg.UnpackAny(anyMsg, &msg); err != nil {
+			// Unknown msg type — not a funds msg we care about.
+			continue
+		}
+		w, ok := msg.(*sendingtypes.MsgWithdrawFromSubaccount)
+		if !ok {
+			continue
+		}
+		if w.AssetId != assettypes.AssetUsdc.Id {
+			continue
+		}
+		sum := total + w.Quantums
+		if sum < total {
+			return 0, fmt.Errorf("withdraw quantums total overflows uint64")
+		}
+		total = sum
+	}
+	return total, nil
 }
 
 // signerAddressFromTxRaw decodes a TxRaw bytes blob, extracts the first

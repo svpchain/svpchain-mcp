@@ -80,3 +80,67 @@ func BuildDepositToSubaccount(
 	}
 	return msg, txPayload, nil
 }
+
+// -- build_withdraw_from_subaccount ------------------------------------
+
+// WithdrawFromSubaccountInput drives build_withdraw_from_subaccount.
+// Mirror of DepositToSubaccountInput with the bank/subaccount roles
+// reversed. USDC-only, same rationale.
+type WithdrawFromSubaccountInput struct {
+	// Owner is both the subaccount sender (Owner+SubaccountNum) and the
+	// bech32 bank-account recipient — withdraw moves funds out of the
+	// owner's subaccount back into the owner's bank balance.
+	Owner         string
+	SubaccountNum uint32
+
+	HumanUSDC string
+
+	PayloadClientID string
+}
+
+// BuildWithdrawFromSubaccount constructs a MsgWithdrawFromSubaccount +
+// TxPayload. As with the deposit builder, cap enforcement happens in the
+// tool handler, not here.
+func BuildWithdrawFromSubaccount(
+	in WithdrawFromSubaccountInput,
+	asm *Assembler,
+	accountNumber, sequence uint64,
+) (*sendingtypes.MsgWithdrawFromSubaccount, *payload.TxPayload, error) {
+	quantums, err := limits.HumanToQuantums(in.HumanUSDC)
+	if err != nil {
+		return nil, nil, fmt.Errorf("human_usdc: %w", err)
+	}
+	if quantums == 0 {
+		return nil, nil, fmt.Errorf("human_usdc must be > 0")
+	}
+
+	msg := sendingtypes.NewMsgWithdrawFromSubaccount(
+		satypes.SubaccountId{Owner: in.Owner, Number: in.SubaccountNum},
+		in.Owner,
+		assettypes.AssetUsdc.Id,
+		quantums,
+	)
+	if err := msg.ValidateBasic(); err != nil {
+		return nil, nil, fmt.Errorf("MsgWithdrawFromSubaccount.ValidateBasic: %w", err)
+	}
+
+	summary := payload.Summary{
+		ToolName:    "build_withdraw_from_subaccount",
+		MsgTypeURL:  "/dydxprotocol.sending.MsgWithdrawFromSubaccount",
+		Subaccount:  payload.SubaccountRef{Owner: in.Owner, Number: in.SubaccountNum},
+		AssetID:     assettypes.AssetUsdc.Id,
+		AmountHuman: in.HumanUSDC,
+	}
+	txPayload, err := asm.Assemble(Args{
+		Msgs:          []sdk.Msg{msg},
+		SignerAddress: in.Owner,
+		AccountNumber: accountNumber,
+		Sequence:      sequence,
+		ClientID:      in.PayloadClientID,
+		Summary:       summary,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("assemble: %w", err)
+	}
+	return msg, txPayload, nil
+}

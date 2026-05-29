@@ -78,3 +78,72 @@ func (h *Handlers) BuildDepositToSubaccount(
 	}
 	return nil, BuildDepositToSubaccountOutput{Payload: *p}, nil
 }
+
+// -- build_withdraw_from_subaccount ------------------------------------
+
+type BuildWithdrawFromSubaccountInput struct {
+	SubaccountNumber uint32 `json:"subaccount_number"`
+	HumanUSDC        string `json:"human_usdc" jsonschema:"USDC amount in human units, e.g. \"100\" or \"1.5\""`
+	PayloadClientID  string `json:"payload_client_id" jsonschema:"broadcast-idempotency uuid"`
+}
+
+type BuildWithdrawFromSubaccountOutput struct {
+	Payload payload.TxPayload `json:"payload"`
+}
+
+func (h *Handlers) BuildWithdrawFromSubaccount(
+	ctx context.Context,
+	_ *mcp.CallToolRequest,
+	in BuildWithdrawFromSubaccountInput,
+) (*mcp.CallToolResult, BuildWithdrawFromSubaccountOutput, error) {
+	tc, ok := TenantFrom(ctx)
+	if !ok {
+		return nil, BuildWithdrawFromSubaccountOutput{}, ErrNoTenant
+	}
+	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
+		return nil, BuildWithdrawFromSubaccountOutput{}, err
+	}
+	tp, err := h.Deps.Policy.Tenant(tc.TenantID)
+	if err != nil {
+		return nil, BuildWithdrawFromSubaccountOutput{}, err
+	}
+	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
+		return nil, BuildWithdrawFromSubaccountOutput{}, err
+	}
+	if !h.Deps.RateLimit.Allow("build_withdraw_from_subaccount:" + tc.TenantID) {
+		return nil, BuildWithdrawFromSubaccountOutput{}, userErrf("rate limit exceeded")
+	}
+
+	// Build-time enforcement is best-effort UX — it gives the caller a fast
+	// structured rejection without burning a sign. The real safety net runs
+	// at broadcast_signed_tx, where we decode the tx and re-Enforce against
+	// the ledger that may have advanced between build and broadcast.
+	quantums, err := limits.HumanToQuantums(in.HumanUSDC)
+	if err != nil {
+		return nil, BuildWithdrawFromSubaccountOutput{}, fmt.Errorf("human_usdc: %w", err)
+	}
+	if err := limits.Enforce(h.Deps.Limits, h.Deps.WithdrawLedger, tc.TenantID, limits.ToolWithdraw, quantums); err != nil {
+		return nil, BuildWithdrawFromSubaccountOutput{}, err
+	}
+
+	acc, err := h.Deps.Chain.Account.Account(ctx, tp.Owner)
+	if err != nil {
+		return nil, BuildWithdrawFromSubaccountOutput{}, fmt.Errorf("read account state: %w", err)
+	}
+
+	_, p, err := builder.BuildWithdrawFromSubaccount(
+		builder.WithdrawFromSubaccountInput{
+			Owner:           tp.Owner,
+			SubaccountNum:   in.SubaccountNumber,
+			HumanUSDC:       in.HumanUSDC,
+			PayloadClientID: in.PayloadClientID,
+		},
+		h.Deps.Builder,
+		acc.AccountNumber,
+		acc.Sequence,
+	)
+	if err != nil {
+		return nil, BuildWithdrawFromSubaccountOutput{}, err
+	}
+	return nil, BuildWithdrawFromSubaccountOutput{Payload: *p}, nil
+}
