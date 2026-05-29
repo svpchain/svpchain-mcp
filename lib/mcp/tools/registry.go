@@ -131,6 +131,27 @@ func Register(srv *mcp.Server, h *Handlers) {
 		Description: "Construct (but do not sign) a short-term limit order. Returns a TxPayload to sign locally and pass to broadcast_signed_tx.",
 	}, h.BuildPlaceLimitOrder)
 
+	// v0.2.2: market / conditional / cancel / batch_cancel.
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_place_market_order",
+		Description: "Construct a short-term IOC \"market\" order — an IOC limit at a worst price the caller commits to (explicit worst_price, or derived from oracle_price + slippage_bps).",
+	}, h.BuildPlaceMarketOrder)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_place_conditional_order",
+		Description: "Construct a stateful conditional order (STOP_LOSS or TAKE_PROFIT). Activates as a limit order when the oracle crosses trigger_price; expires at good_til_block_time.",
+	}, h.BuildPlaceConditionalOrder)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_cancel_order",
+		Description: "Construct a cancel for a single open order. order_flags must be set explicitly (0=ShortTerm, 32=Conditional, 64=LongTerm).",
+	}, h.BuildCancelOrder)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_batch_cancel_orders",
+		Description: "Construct a batch cancel of short-term orders (chain accepts MsgBatchCancel for short-term only). Accepts (clob_pair_id, client_ids) tuples.",
+	}, h.BuildBatchCancelOrders)
+
 	// E. Cross-cutting.
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "broadcast_signed_tx",

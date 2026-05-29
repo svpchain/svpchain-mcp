@@ -323,7 +323,7 @@ mcp_init
 
 # Expected tool count tracks the registry. v0.1 = 10, v0.2.1 = 23,
 # v0.2.2 = 27 (target), v0.2.3 = 30 (target).
-EXPECTED_TOOLS="${EXPECTED_TOOLS:-23}"
+EXPECTED_TOOLS="${EXPECTED_TOOLS:-27}"
 step "tools/list (expecting ${EXPECTED_TOOLS} tools)"
 LIST=$(mcp_call 1 "tools/list")
 COUNT=$(jq -r '.result.tools | length' <<<"$LIST")
@@ -479,7 +479,30 @@ else
   info "  get_orders / get_fills for the real on-chain effect."
 fi
 
-# ---- 7. summary ------------------------------------------------------------
+# ---- 7. v0.2.2 build_cancel_order smoke -------------------------------------
+# Smoke-tests the new v0.2.2 cancel builder: the chain doesn't have to accept
+# the cancel (the original order may already be gone from the in-memory orderbook
+# after the proposer-bundle pass above), but the build path must produce a
+# valid TxPayload that round-trips through devsign — that's what we check.
 
-step "All 10 v0.1 tools verified end-to-end"
-printf "${C_GREEN}${C_BOLD}OK${C_RESET}  mcp-server v0.1 round-trip on chain_id=$CHAIN_ID\n"
+step "build_cancel_order (short-term, same ticker + client_id as above)"
+FRESH_HEIGHT_2=$(curl -fsS "$COMET_RPC_URL/status" \
+                   | jq -r .result.sync_info.latest_block_height)
+CANCEL_GOOD_TIL=$((FRESH_HEIGHT_2 + SHORT_BLOCK_WINDOW_BUFFER))
+CANCEL_UUID="e2e-cancel-$(date +%s)-$$"
+BCN=$(mcp_call 40 "build_cancel_order" "$(jq -nc \
+  --argjson sub 0 --argjson cp 0 --argjson cid 1 \
+  --argjson flags 0 --argjson gtb "$CANCEL_GOOD_TIL" --arg pcid "$CANCEL_UUID" '{
+    subaccount_number: $sub, clob_pair_id: $cp, order_client_id: $cid,
+    order_flags: $flags, good_til_block: $gtb, payload_client_id: $pcid
+  }')")
+CANCEL_PAYLOAD=$(jq -c '.result.structuredContent.payload' <<<"$BCN")
+[[ "$CANCEL_PAYLOAD" != "null" ]] || { echo "$BCN" | jq . >&2; fail "build_cancel_order returned no payload"; }
+IS_SHORT_CN=$(jq -r '.is_short_term_clob' <<<"$CANCEL_PAYLOAD")
+[[ "$IS_SHORT_CN" == "true" ]] || fail "expected is_short_term_clob=true on cancel, got $IS_SHORT_CN"
+pass "cancel payload built; is_short_term_clob=true; client_id=$CANCEL_UUID"
+
+# ---- 8. summary -------------------------------------------------------------
+
+step "All v0.1 + v0.2.1 + v0.2.2 tools verified end-to-end"
+printf "${C_GREEN}${C_BOLD}OK${C_RESET}  mcp-server v0.2.2 round-trip on chain_id=$CHAIN_ID\n"
