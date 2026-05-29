@@ -5,28 +5,22 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	// Blank import sets sdk bech32 prefix to "svp" via init() — required
-	// for any test that runs Msg*.ValidateBasic on a SubaccountId.
-	_ "github.com/dydxprotocol/v4-chain/protocol/app/config"
+	// testOwner, newTestAsm, and the app/config blank-import live in
+	// testutil_test.go (same package).
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
 	clobtypes "github.com/dydxprotocol/v4-chain/protocol/x/clob/types"
 )
 
-func newCancelAsm(t *testing.T) *builder.Assembler {
-	t.Helper()
-	return builder.NewAssembler("test-chain")
-}
-
 func TestBuildCancelOrder_ShortTerm(t *testing.T) {
 	msg, p, err := builder.BuildCancelOrder(builder.CancelOrderInput{
-		Owner:           "svp199tqg4wdlnu4qjlxchpd7seg454937hjk505pe",
+		Owner:           testOwner,
 		SubaccountNum:   0,
 		ClobPairID:      0,
 		OrderClientID:   42,
 		OrderFlags:      clobtypes.OrderIdFlags_ShortTerm,
 		GoodTilBlock:    100,
 		PayloadClientID: "uuid-1",
-	}, newCancelAsm(t), 7, 17)
+	}, newTestAsm(t), 7, 17)
 	require.NoError(t, err)
 	require.Equal(t, clobtypes.OrderIdFlags_ShortTerm, msg.OrderId.OrderFlags)
 	require.NotNil(t, msg.GoodTilOneof)
@@ -35,14 +29,14 @@ func TestBuildCancelOrder_ShortTerm(t *testing.T) {
 
 func TestBuildCancelOrder_Stateful(t *testing.T) {
 	msg, p, err := builder.BuildCancelOrder(builder.CancelOrderInput{
-		Owner:            "svp199tqg4wdlnu4qjlxchpd7seg454937hjk505pe",
+		Owner:            testOwner,
 		SubaccountNum:    0,
 		ClobPairID:       0,
 		OrderClientID:    42,
 		OrderFlags:       clobtypes.OrderIdFlags_LongTerm,
 		GoodTilBlockTime: 1780000000,
 		PayloadClientID:  "uuid-2",
-	}, newCancelAsm(t), 7, 17)
+	}, newTestAsm(t), 7, 17)
 	require.NoError(t, err)
 	require.Equal(t, clobtypes.OrderIdFlags_LongTerm, msg.OrderId.OrderFlags)
 	require.False(t, p.IsShortTermCLOB, "long-term cancel must not be marked IsShortTermCLOB")
@@ -93,7 +87,7 @@ func TestBuildCancelOrder_Rejects(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := builder.BuildCancelOrder(tc.in, newCancelAsm(t), 1, 1)
+			_, _, err := builder.BuildCancelOrder(tc.in, newTestAsm(t), 1, 1)
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.wantErr)
 		})
@@ -102,7 +96,7 @@ func TestBuildCancelOrder_Rejects(t *testing.T) {
 
 func TestBuildBatchCancelOrders_HappyPath(t *testing.T) {
 	msg, p, err := builder.BuildBatchCancelOrders(builder.BatchCancelOrdersInput{
-		Owner:         "svp199tqg4wdlnu4qjlxchpd7seg454937hjk505pe",
+		Owner:         testOwner,
 		SubaccountNum: 0,
 		Batches: []builder.OrderBatchInput{
 			{ClobPairID: 0, ClientIDs: []uint32{1, 2, 3}},
@@ -110,7 +104,7 @@ func TestBuildBatchCancelOrders_HappyPath(t *testing.T) {
 		},
 		GoodTilBlock:    100,
 		PayloadClientID: "uuid-batch-1",
-	}, newCancelAsm(t), 7, 17)
+	}, newTestAsm(t), 7, 17)
 	require.NoError(t, err)
 	require.Len(t, msg.ShortTermCancels, 2)
 	require.Equal(t, []uint32{1, 2, 3}, msg.ShortTermCancels[0].ClientIds)
@@ -149,7 +143,7 @@ func TestBuildBatchCancelOrders_Rejects(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := builder.BuildBatchCancelOrders(tc.in, newCancelAsm(t), 1, 1)
+			_, _, err := builder.BuildBatchCancelOrders(tc.in, newTestAsm(t), 1, 1)
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.wantErr)
 		})

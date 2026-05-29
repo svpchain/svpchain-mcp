@@ -11,9 +11,8 @@ import (
 	"cosmossdk.io/log"
 	"github.com/stretchr/testify/require"
 
-	// Blank import sets the sdk bech32 prefix to "svp" via init() —
-	// required for any test that exercises Msg*.ValidateBasic.
-	_ "github.com/dydxprotocol/v4-chain/protocol/app/config"
+	// testOwner, newTestAsm, and the app/config blank-import live in
+	// testutil_test.go (same package).
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
@@ -69,13 +68,6 @@ func newBtcCache(t *testing.T) *markets.Cache {
 	return c
 }
 
-const testOwner = "svp199tqg4wdlnu4qjlxchpd7seg454937hjk505pe"
-
-func newAsm(t *testing.T) *builder.Assembler {
-	t.Helper()
-	return builder.NewAssembler("test-chain")
-}
-
 func TestBuildPlaceLimitOrder_Happy(t *testing.T) {
 	cache := newBtcCache(t)
 	msg, p, err := builder.BuildPlaceLimitOrder(builder.PlaceLimitOrderInput{
@@ -88,7 +80,7 @@ func TestBuildPlaceLimitOrder_Happy(t *testing.T) {
 		GoodTilBlock:    100,
 		OrderClientID:   1,
 		PayloadClientID: "uuid-limit",
-	}, cache, newAsm(t), 7, 17)
+	}, cache, newTestAsm(t), 7, 17)
 	require.NoError(t, err)
 	require.Equal(t, clobtypes.Order_SIDE_BUY, msg.Order.Side)
 	require.Equal(t, clobtypes.OrderIdFlags_ShortTerm, msg.Order.OrderId.OrderFlags)
@@ -107,7 +99,7 @@ func TestBuildPlaceMarketOrder_ExplicitWorstPrice(t *testing.T) {
 		GoodTilBlock:    100,
 		OrderClientID:   2,
 		PayloadClientID: "uuid-market-1",
-	}, cache, newAsm(t), 7, 17)
+	}, cache, newTestAsm(t), 7, 17)
 	require.NoError(t, err)
 	require.Equal(t, clobtypes.Order_TIME_IN_FORCE_IOC, msg.Order.TimeInForce, "market = IOC limit")
 	require.True(t, p.IsShortTermCLOB)
@@ -127,7 +119,7 @@ func TestBuildPlaceMarketOrder_OraclePlusSlippage(t *testing.T) {
 		GoodTilBlock:    100,
 		OrderClientID:   3,
 		PayloadClientID: "uuid-market-2",
-	}, cache, newAsm(t), 7, 17)
+	}, cache, newTestAsm(t), 7, 17)
 	require.NoError(t, err)
 	// 65000 * 1.01 = 65650 → 6_565_000_000 subticks (tick-snap exact).
 	require.Equal(t, uint64(6_565_000_000), msg.Order.Subticks)
@@ -144,7 +136,7 @@ func TestBuildPlaceMarketOrder_RequiresPriceStrategy(t *testing.T) {
 		GoodTilBlock:    100,
 		OrderClientID:   4,
 		PayloadClientID: "uuid-market-3",
-	}, cache, newAsm(t), 7, 17)
+	}, cache, newTestAsm(t), 7, 17)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "worst_price")
 }
@@ -162,7 +154,7 @@ func TestBuildPlaceConditionalOrder_StopLoss(t *testing.T) {
 		GoodTilBlockTime: 1780000000,
 		OrderClientID:    5,
 		PayloadClientID:  "uuid-cond",
-	}, cache, newAsm(t), 7, 17)
+	}, cache, newTestAsm(t), 7, 17)
 	require.NoError(t, err)
 	require.Equal(t, clobtypes.OrderIdFlags_Conditional, msg.Order.OrderId.OrderFlags)
 	require.Equal(t, clobtypes.Order_CONDITION_TYPE_STOP_LOSS, msg.Order.ConditionType)
@@ -184,7 +176,7 @@ func TestBuildPlaceConditionalOrder_BadConditionType(t *testing.T) {
 		GoodTilBlockTime: 1780000000,
 		OrderClientID:    6,
 		PayloadClientID:  "uuid-cond-bad",
-	}, cache, newAsm(t), 7, 17)
+	}, cache, newTestAsm(t), 7, 17)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "condition_type")
 }
