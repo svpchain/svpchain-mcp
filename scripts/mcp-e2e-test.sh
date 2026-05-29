@@ -43,8 +43,16 @@ COMET_RPC_URL="${COMET_RPC_URL:-http://127.0.0.1:26657}"
 INDEXER_BASE_URL="${INDEXER_BASE_URL:-http://127.0.0.1:3002}"
 LISTEN_ADDR="${LISTEN_ADDR:-127.0.0.1:8765}"
 TENANT_TOKEN="${TENANT_TOKEN:-e2e-token}"
-DEV_KEY_NAME="${DEV_KEY_NAME:-dev0}"
+# flow0 is funded by scripts/lib/trading_genesis.sh — 500k USDC bank +
+# 100k USDC subaccount 0. dev0 (the obvious-looking default) is NOT
+# funded by the trading genesis; using it makes every DeliverTx fail at
+# the funds phases. Pre-flight balance check below will catch this if a
+# future override picks an unfunded key.
+DEV_KEY_NAME="${DEV_KEY_NAME:-flow0}"
 KEYRING="${KEYRING:-test}"
+# USDC denom matches trading_genesis.sh / fullflow_test.sh — used by
+# the pre-flight balance check below.
+USDC_DENOM="${USDC_DENOM:-erc20/usdc}"
 
 WORKDIR="$(mktemp -d -t mcp-e2e.XXXXXX)"
 trap 'on_exit' EXIT INT TERM
@@ -263,6 +271,39 @@ fi
 pass "32-byte private key extracted"
 export DEVSIGN_KEY_HEX="$DEV_KEY_HEX"
 
+# ---- 3.5. pre-flight balance check -----------------------------------------
+# v0.2.3 funds phases depend on actual on-chain balance — every prior
+# failure mode I've hit (insufficient bank, empty subaccount) would have
+# been caught here with a clear "use DEV_KEY_NAME=..." hint instead of
+# a chain-side code 5 / 102 surfacing through the e2e helper. Threshold
+# math: deposit phase moves 10 USDC, so bank needs ≥ a generous 50 USDC
+# headroom; withdraw + transfer need only a few USDC in the subaccount.
+
+step "Pre-flight balance check ($DEV_KEY_NAME)"
+BANK_RAW=$(svpchaind query bank balances "$OWNER_ADDR" -o json 2>/dev/null) \
+  || fail "svpchaind query bank balances $OWNER_ADDR"
+BANK_QUANTUMS=$(jq -r --arg d "$USDC_DENOM" \
+  '.balances[] | select(.denom == $d) | .amount' <<<"$BANK_RAW")
+BANK_QUANTUMS="${BANK_QUANTUMS:-0}"
+BANK_USDC=$((BANK_QUANTUMS / 1000000))
+if [[ "$BANK_USDC" -lt 50 ]]; then
+  fail "bank USDC=$BANK_USDC (need ≥ 50 for the deposit phase). Override with DEV_KEY_NAME=<a funded key>; trading_genesis.sh funds flow0/flow1/localval."
+fi
+pass "bank: $BANK_USDC USDC (denom $USDC_DENOM)"
+
+SA_RAW=$(svpchaind query subaccounts show-subaccount "$OWNER_ADDR" 0 -o json 2>/dev/null) \
+  || fail "svpchaind query subaccounts show-subaccount $OWNER_ADDR 0 (does the subaccount exist?)"
+# Subaccount asset position for USDC is asset_id=0 (quote currency).
+SA_QUANTUMS=$(jq -r '.subaccount.asset_positions[]? | select(.asset_id == 0) | .quantums' <<<"$SA_RAW")
+SA_QUANTUMS="${SA_QUANTUMS:-0}"
+# Quantums are stored as a JSON string in dec form; strip any quotes/sign.
+SA_QUANTUMS="${SA_QUANTUMS//\"/}"
+SA_USDC=$((${SA_QUANTUMS#-} / 1000000))
+if [[ "$SA_USDC" -lt 10 ]]; then
+  fail "subaccount 0 USDC=$SA_USDC (need ≥ 10 for the withdraw + transfer phases). Override with DEV_KEY_NAME=<a funded key>."
+fi
+pass "subaccount 0: $SA_USDC USDC quote balance"
+
 # ---- 4. write mcp.toml -----------------------------------------------------
 
 step "Write mcp-server config to $WORKDIR/mcp.toml"
@@ -411,10 +452,15 @@ FRESH_HEIGHT=$(curl -fsS "$COMET_RPC_URL/status" \
 GOOD_TIL=$((FRESH_HEIGHT + SHORT_BLOCK_WINDOW_BUFFER))
 step "build_place_limit_order ($TICKER, BUY 0.001 @ 1.00, good_til_block=$GOOD_TIL [height=$FRESH_HEIGHT + $SHORT_BLOCK_WINDOW_BUFFER])"
 PAYLOAD_UUID="e2e-$(date +%s)-$$"
+# client_id is bumped to a high value to avoid collision with orders
+# left on the books by earlier fullflow phases that trade on this same
+# key (flow0). Pick something well outside any plausible per-phase
+# counter — 999000001 also makes the e2e's order easy to spot in logs.
+MCP_E2E_CLIENT_ID=999000001
 BPL=$(mcp_call 7 "build_place_limit_order" "$(jq -nc \
   --argjson sub 0 --arg ticker "$TICKER" --arg side BUY \
   --arg size "0.001" --arg price "1.00" \
-  --argjson gtb "$GOOD_TIL" --argjson cid 1 --arg pcid "$PAYLOAD_UUID" '{
+  --argjson gtb "$GOOD_TIL" --argjson cid "$MCP_E2E_CLIENT_ID" --arg pcid "$PAYLOAD_UUID" '{
     subaccount_number: $sub, ticker: $ticker, side: $side,
     size: $size, price: $price, good_til_block: $gtb,
     order_client_id: $cid, payload_client_id: $pcid
@@ -503,7 +549,7 @@ FRESH_HEIGHT_2=$(curl -fsS "$COMET_RPC_URL/status" \
 CANCEL_GOOD_TIL=$((FRESH_HEIGHT_2 + SHORT_BLOCK_WINDOW_BUFFER))
 CANCEL_UUID="e2e-cancel-$(date +%s)-$$"
 BCN=$(mcp_call 40 "build_cancel_order" "$(jq -nc \
-  --argjson sub 0 --argjson cp 0 --argjson cid 1 \
+  --argjson sub 0 --argjson cp 0 --argjson cid "$MCP_E2E_CLIENT_ID" \
   --argjson flags 0 --argjson gtb "$CANCEL_GOOD_TIL" --arg pcid "$CANCEL_UUID" '{
     subaccount_number: $sub, clob_pair_id: $cp, order_client_id: $cid,
     order_flags: $flags, good_til_block: $gtb, payload_client_id: $pcid
@@ -519,8 +565,15 @@ pass "cancel payload built; is_short_term_clob=true; client_id=$CANCEL_UUID"
 # broadcast. The negative phase fires only the build_* path (structured cap
 # rejection arrives before signing, so no chain involvement needed).
 
-# Shared helper: build → devsign → broadcast a funds tool, fail if the
-# chain rejects (Code != 0). Args: TOOL_NAME, ARGS_JSON, CALL_ID, UUID.
+# Shared helper: build → devsign → broadcast → wait-for-commit. The
+# commit wait is REQUIRED because broadcast_signed_tx returns after
+# CheckTx accepts (mempool), not after DeliverTx commits. Without it,
+# the next phase's build_* would read the chain's committed sequence
+# while the prior tx is still in flight, and the chain would reject
+# the next broadcast with "account sequence mismatch". Funds txs (unlike
+# short-term CLOB orders) ARE standalone txs, so the tx hash is expected
+# to appear in CometBFT history within a block or two. Args: TOOL_NAME,
+# ARGS_JSON, CALL_ID, UUID.
 funds_round_trip() {
   local tool="$1" args="$2" call_id="$3" uuid="$4"
   local resp payload bcast tx_hash code raw_log
@@ -541,9 +594,32 @@ funds_round_trip() {
     raw_log=$(jq -r '.result.structuredContent.result.raw_log' <<<"$bcast")
     fail "$tool broadcast rejected: code=$code raw_log=$raw_log"
   fi
-  pass "$tool round-trip: tx_hash=$tx_hash"
+  # Poll get_tx_status until height > 0. Up to 20 * 0.5s = 10s — plenty
+  # for a 1-2s localnet block time.
+  local landed_height=0 deliver_code=0
+  for i in $(seq 1 20); do
+    local st
+    st=$(mcp_call "$((call_id + 2 + i))" "get_tx_status" "{\"tx_hash\":\"$tx_hash\"}" 2>/dev/null) \
+      || { sleep 0.5; continue; }
+    landed_height=$(jq -r '.result.structuredContent.height // 0' <<<"$st")
+    if [[ "$landed_height" -gt 0 ]]; then
+      deliver_code=$(jq -r '.result.structuredContent.code // 0' <<<"$st")
+      break
+    fi
+    sleep 0.5
+  done
+  if [[ "$landed_height" -eq 0 ]]; then
+    fail "$tool: tx $tx_hash didn't land in 10s — next phase would race on sequence"
+  fi
+  if [[ "$deliver_code" != "0" ]]; then
+    fail "$tool: DeliverTx rejected at height=$landed_height code=$deliver_code"
+  fi
+  pass "$tool round-trip: tx_hash=$tx_hash height=$landed_height"
 }
 
+# Natural order: deposit → withdraw → transfer. The pre-flight check
+# above guarantees the test key has enough USDC in BOTH bank (for the
+# deposit) and subaccount (for the withdraw + transfer).
 step "build_deposit_to_subaccount (10 USDC, sub 0)"
 DEP_UUID="e2e-dep-$(date +%s)-$$"
 funds_round_trip "build_deposit_to_subaccount" \
