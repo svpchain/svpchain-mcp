@@ -281,12 +281,15 @@ mode = "bearer"
 markets_refresh = "30s"
 
 [limits]
-# v0.2.3 funds-tool caps. Sized so the positive phases below fit and the
-# negative phase ("over-cap deposit") exceeds the per-tx ceiling.
+# v0.2.3 funds-tool caps. Sized so the positive phases below fit, the
+# over-cap deposit negative phase exceeds the per-tx ceiling, and the
+# daily withdraw cap fires after one positive withdraw + one retry —
+# specifically: positive withdraw is 3 USDC, daily cap is 5 USDC, so
+# a subsequent 3 USDC withdraw must reject (3 + 3 > 5).
 deposit_max_usdc       = 1000
 withdraw_max_usdc      = 500
 transfer_max_usdc      = 500
-daily_withdraw_cap_usdc = 1000
+daily_withdraw_cap_usdc = 5
 
 [[tenants]]
 tenant_id           = "e2e"
@@ -562,33 +565,49 @@ funds_round_trip "build_transfer_between_subaccounts" \
      '{sender_subaccount_number: $s, recipient_subaccount_number: $r, human_usdc: $amt, payload_client_id: $pcid}')" \
   220 "$XF_UUID"
 
-# ---- 9. v0.2.3 cap rejection (negative) -------------------------------------
-# build_deposit with 2000 USDC > deposit_max_usdc=1000. Expect the
-# structured cap rejection from limits.CheckPerTx — fires pre-sign so
-# there's no chain involvement.
+# ---- 9. v0.2.3 cap rejections (negative) ------------------------------------
+# Both rejections fire at the build_* stage (limits.{CheckPerTx,Enforce})
+# before the tx is assembled or signed — no chain involvement needed.
 
-step "build_deposit_to_subaccount (2000 USDC > 1000 USDC cap, expect rejection)"
-OVER_UUID="e2e-over-$(date +%s)-$$"
-# Don't use mcp_call here — it fail()s on isError. Use raw curl so we can
-# assert the rejection ourselves.
-OVER_BODY=$(jq -nc \
-  --argjson sub 0 --arg amt "2000" --arg pcid "$OVER_UUID" \
-  '{jsonrpc:"2.0", id:230, method:"tools/call",
-    params:{name:"build_deposit_to_subaccount",
-            arguments:{subaccount_number:$sub, human_usdc:$amt, payload_client_id:$pcid}}}')
-OVER_RAW=$(curl -sS -H "Authorization: Bearer $TENANT_TOKEN" \
-                    -H "Content-Type: application/json" \
-                    -H "Accept: $MCP_ACCEPT" \
-                    -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION" \
-                    ${MCP_SESSION_ID:+-H "Mcp-Session-Id: $MCP_SESSION_ID"} \
-                    -d "$OVER_BODY" "http://$LISTEN_ADDR/")
-OVER_RESP=$(extract_json "$OVER_RAW")
-OVER_MSG=$(jq -r '.result.content[0].text // ""' <<<"$OVER_RESP")
-if [[ "$OVER_MSG" != *"deposit_max_usdc exceeded"* ]]; then
-  echo "$OVER_RESP" | jq . >&2
-  fail "expected 'deposit_max_usdc exceeded' in cap rejection, got: $OVER_MSG"
-fi
-pass "cap rejection surfaced: $OVER_MSG"
+# expect_cap_rejection TOOL_NAME ARGS_JSON CALL_ID EXPECT_SUBSTRING — sends a
+# tools/call via raw curl (mcp_call would fail() on isError) and asserts that
+# the cap error message contains EXPECT_SUBSTRING.
+expect_cap_rejection() {
+  local tool="$1" args="$2" call_id="$3" expect="$4"
+  local body resp msg
+  body=$(jq -nc --argjson id "$call_id" --arg t "$tool" --argjson a "$args" \
+    '{jsonrpc:"2.0", id:$id, method:"tools/call",
+      params:{name:$t, arguments:$a}}')
+  local raw
+  raw=$(curl -sS -H "Authorization: Bearer $TENANT_TOKEN" \
+                 -H "Content-Type: application/json" \
+                 -H "Accept: $MCP_ACCEPT" \
+                 -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION" \
+                 ${MCP_SESSION_ID:+-H "Mcp-Session-Id: $MCP_SESSION_ID"} \
+                 -d "$body" "http://$LISTEN_ADDR/")
+  resp=$(extract_json "$raw")
+  msg=$(jq -r '.result.content[0].text // ""' <<<"$resp")
+  if [[ "$msg" != *"$expect"* ]]; then
+    echo "$resp" | jq . >&2
+    fail "expected '$expect' in $tool rejection, got: $msg"
+  fi
+  pass "$tool rejection surfaced: $msg"
+}
+
+step "build_deposit_to_subaccount (2000 USDC > 1000 USDC per-tx cap)"
+expect_cap_rejection "build_deposit_to_subaccount" \
+  "$(jq -nc --argjson sub 0 --arg amt "2000" --arg pcid "e2e-over-dep-$(date +%s)-$$" \
+     '{subaccount_number: $sub, human_usdc: $amt, payload_client_id: $pcid}')" \
+  230 "deposit_max_usdc exceeded"
+
+# Daily cap: the positive withdraw above consumed 3 USDC of the 5 USDC
+# daily allotment. Another 3 USDC pushes used+request (3+3=6) past the
+# cap, even though 3 USDC is well under withdraw_max_usdc=500.
+step "build_withdraw_from_subaccount (3 USDC, would push daily 3→6 > 5 cap)"
+expect_cap_rejection "build_withdraw_from_subaccount" \
+  "$(jq -nc --argjson sub 0 --arg amt "3" --arg pcid "e2e-over-wd-$(date +%s)-$$" \
+     '{subaccount_number: $sub, human_usdc: $amt, payload_client_id: $pcid}')" \
+  240 "daily_withdraw_cap exceeded"
 
 # ---- 10. summary ------------------------------------------------------------
 
