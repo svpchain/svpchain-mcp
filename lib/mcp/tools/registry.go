@@ -152,6 +152,12 @@ func Register(srv *mcp.Server, h *Handlers) {
 		Description: "Construct a batch cancel of short-term orders (chain accepts MsgBatchCancel for short-term only). Accepts (clob_pair_id, client_ids) tuples.",
 	}, h.BuildBatchCancelOrders)
 
+	// D. Funds movement (v0.2.3).
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_deposit_to_subaccount",
+		Description: "Construct a deposit from the owner's bank account into one of their subaccounts (USDC only on svpchain). Per-tx cap enforced if configured.",
+	}, h.BuildDepositToSubaccount)
+
 	// E. Cross-cutting.
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "broadcast_signed_tx",

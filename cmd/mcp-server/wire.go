@@ -12,6 +12,7 @@ import (
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/limits"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/logging"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/policy"
@@ -70,6 +71,18 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 		tenantToOwner[t.TenantID] = t.Owner
 	}
 
+	// Funds-tool safety rails: caps come straight from cfg.Limits; the
+	// withdraw ledger is in-memory, keyed by tenant_id, and resets on
+	// restart. Swapping in a durable backend is an implementation of
+	// limits.WithdrawLedger — no handler changes required.
+	limitsCfg := limits.Config{
+		DepositMaxUSDC:       cfg.Limits.DepositMaxUSDC,
+		WithdrawMaxUSDC:      cfg.Limits.WithdrawMaxUSDC,
+		TransferMaxUSDC:      cfg.Limits.TransferMaxUSDC,
+		DailyWithdrawCapUSDC: cfg.Limits.DailyWithdrawCapUSDC,
+	}
+	withdrawLedger := limits.NewMemoryLedger(limitsCfg.DailyWithdrawCapUSDC, nil)
+
 	deps := tools.Deps{
 		Chain:             chainDeps,
 		Indexer:           idx,
@@ -79,6 +92,8 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 		Auditor:           policy.NewStdoutAuditor(),
 		Idempotency:       policy.NewIdempotency(0),
 		RateLimit:         policy.NewRateLimiter(0, 0),
+		Limits:            limitsCfg,
+		WithdrawLedger:    withdrawLedger,
 		Logger:            logger,
 		InterfaceRegistry: encCfg.InterfaceRegistry,
 		BroadcastMode:     cfg.BroadcastMode,

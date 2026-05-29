@@ -7,6 +7,7 @@ import (
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/limits"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/policy"
 )
@@ -34,6 +35,13 @@ type Deps struct {
 	Auditor     *policy.Auditor
 	Idempotency *policy.Idempotency
 	RateLimit   *policy.RateLimiter
+
+	// Limits + WithdrawLedger drive the v0.2.3 funds-tool safety rails.
+	// Limits is a pure config; WithdrawLedger holds per-tenant daily spend
+	// state (MemoryLedger by default, swappable for a durable backend
+	// without touching handler code).
+	Limits         limits.Config
+	WithdrawLedger limits.WithdrawLedger
 
 	Logger log.Logger
 
