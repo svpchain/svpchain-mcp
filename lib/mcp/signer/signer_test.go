@@ -1,4 +1,4 @@
-package main
+package signer_test
 
 import (
 	"crypto/rand"
@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	txtypes "github.com/cosmos/cosmos-sdk/types/tx"
 	"github.com/cosmos/evm/crypto/ethsecp256k1"
 	"github.com/cosmos/gogoproto/proto"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/signer"
 )
 
 func newRandomPriv(t *testing.T) *ethsecp256k1.PrivKey {
@@ -24,16 +24,16 @@ func newRandomPriv(t *testing.T) *ethsecp256k1.PrivKey {
 	return &ethsecp256k1.PrivKey{Key: bz}
 }
 
-// newSyntheticPayload returns a TxPayload with a tiny but parseable TxBody
-// — enough to exercise the sign / decode / verify path without needing a
-// real Msg.
+// newSyntheticPayload returns a TxPayload with a tiny but parseable TxBody —
+// enough to exercise the sign / decode / verify path without needing a real
+// Msg.
 func newSyntheticPayload(t *testing.T, signerAddr string) *payload.TxPayload {
 	t.Helper()
 	// Minimal proto-marshalled TxBody (memo only, no msgs); chain wouldn't
 	// accept it, but it's enough to exercise the sign/decode/verify path
 	// and the non-empty memo ensures Marshal produces non-nil bytes that
 	// survive a round-trip through proto.Unmarshal.
-	body := &txtypes.TxBody{Memo: "devsign-roundtrip"}
+	body := &txtypes.TxBody{Memo: "signer-roundtrip"}
 	bodyBytes, err := proto.Marshal(body)
 	require.NoError(t, err)
 	return &payload.TxPayload{
@@ -56,10 +56,10 @@ func newSyntheticPayload(t *testing.T, signerAddr string) *payload.TxPayload {
 
 func TestSign_RoundTripDecode(t *testing.T) {
 	priv := newRandomPriv(t)
-	addr := sdk.AccAddress(priv.PubKey().Address()).String()
+	addr := signer.DeriveAddress(priv)
 	p := newSyntheticPayload(t, addr)
 
-	signed, err := sign(priv, p)
+	signed, err := signer.Sign(priv, p)
 	require.NoError(t, err)
 	require.NotEmpty(t, signed.TxRawBytesB64)
 	require.NotEmpty(t, signed.SignatureB64)
@@ -70,7 +70,7 @@ func TestSign_RoundTripDecode(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, proto.Unmarshal(rawBytes, &raw))
 
-	// TxBody bytes inside the signed tx must equal what devsign was given.
+	// TxBody bytes inside the signed tx must equal what the signer was given.
 	// TxPayload carries TxBody as a base64 string; decode for comparison.
 	wantBody, err := base64.StdEncoding.DecodeString(p.TxBodyBytesB64)
 	require.NoError(t, err)
@@ -98,10 +98,10 @@ func TestSign_RoundTripDecode(t *testing.T) {
 
 func TestSign_SignatureVerifies(t *testing.T) {
 	priv := newRandomPriv(t)
-	addr := sdk.AccAddress(priv.PubKey().Address()).String()
+	addr := signer.DeriveAddress(priv)
 	p := newSyntheticPayload(t, addr)
 
-	signed, err := sign(priv, p)
+	signed, err := signer.Sign(priv, p)
 	require.NoError(t, err)
 
 	// Recompute the sign-bytes from the signed tx's own AuthInfo + TxBody
@@ -119,23 +119,32 @@ func TestSign_SignatureVerifies(t *testing.T) {
 
 func TestSign_RejectsAddressMismatch(t *testing.T) {
 	// Use one key but declare a different signer address in the payload —
-	// devsign must refuse rather than silently produce a tx that the
-	// server would reject anyway.
+	// Sign must refuse rather than silently produce a tx that the server
+	// would reject anyway.
 	priv := newRandomPriv(t)
 	p := newSyntheticPayload(t, "svp1someotherbech32stringthatwontmatch")
-	_, err := sign(priv, p)
+	_, err := signer.Sign(priv, p)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not match payload.signer_address")
 }
 
 func TestSign_AcceptsEmptySignerAddress(t *testing.T) {
-	// If the server omits signer_address (e.g. for ad-hoc demos), devsign
-	// should fall through and sign with whatever key the user supplied.
+	// If the server omits signer_address (e.g. for ad-hoc demos), Sign
+	// should fall through and sign with whatever key the caller supplied.
 	priv := newRandomPriv(t)
 	p := newSyntheticPayload(t, "")
-	signed, err := sign(priv, p)
+	signed, err := signer.Sign(priv, p)
 	require.NoError(t, err)
 	require.NotEmpty(t, signed.TxRawBytesB64)
+}
+
+func TestSign_RejectsUnsupportedVersion(t *testing.T) {
+	priv := newRandomPriv(t)
+	p := newSyntheticPayload(t, signer.DeriveAddress(priv))
+	p.Version = 9999
+	_, err := signer.Sign(priv, p)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsupported TxPayload version")
 }
 
 func TestParsePrivKey(t *testing.T) {
@@ -145,15 +154,28 @@ func TestParsePrivKey(t *testing.T) {
 		hexKey += stringFromByte(b)
 	}
 
-	parsed, err := parsePrivKey(hexKey)
+	parsed, err := signer.ParsePrivKey(hexKey)
 	require.NoError(t, err)
 	require.Equal(t, priv.Key, parsed.Key)
 
-	_, err = parsePrivKey("0x" + hexKey)
+	_, err = signer.ParsePrivKey("0x" + hexKey)
 	require.NoError(t, err, "leading 0x should be tolerated")
 
-	_, err = parsePrivKey("not-hex")
+	_, err = signer.ParsePrivKey("not-hex")
 	require.Error(t, err)
+
+	_, err = signer.ParsePrivKey("dead")
+	require.Error(t, err, "wrong-length key must be rejected")
+	require.Contains(t, err.Error(), "32 bytes")
+}
+
+func TestDeriveAddress_HasSvpPrefix(t *testing.T) {
+	// init() must have set the bech32 prefix; otherwise DeriveAddress
+	// would return a "cosmos1..." string and silent address mismatches
+	// would follow.
+	priv := newRandomPriv(t)
+	addr := signer.DeriveAddress(priv)
+	require.True(t, len(addr) > 4 && addr[:4] == "svp1", "expected svp1 prefix, got %s", addr)
 }
 
 // stringFromByte returns the 2-char hex form of b, lowercase.
