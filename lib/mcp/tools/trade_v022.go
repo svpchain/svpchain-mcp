@@ -39,22 +39,9 @@ type BuildPlaceMarketOrderOutput struct {
 func (h *Handlers) BuildPlaceMarketOrder(
 	ctx context.Context, _ *mcp.CallToolRequest, in BuildPlaceMarketOrderInput,
 ) (*mcp.CallToolResult, BuildPlaceMarketOrderOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, BuildPlaceMarketOrderOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
-		return nil, BuildPlaceMarketOrderOutput{}, err
-	}
-	tp, err := h.Deps.Policy.Tenant(tc.TenantID)
+	tp, err := h.authorizeSubaccount(ctx, "build_place_market_order", in.SubaccountNumber)
 	if err != nil {
 		return nil, BuildPlaceMarketOrderOutput{}, err
-	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
-		return nil, BuildPlaceMarketOrderOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("build_place_market_order:" + tc.TenantID) {
-		return nil, BuildPlaceMarketOrderOutput{}, userErrf("rate limit exceeded")
 	}
 	acc, err := h.Deps.Chain.Account.Account(ctx, tp.Owner)
 	if err != nil {
@@ -113,22 +100,9 @@ type BuildPlaceConditionalOrderOutput struct {
 func (h *Handlers) BuildPlaceConditionalOrder(
 	ctx context.Context, _ *mcp.CallToolRequest, in BuildPlaceConditionalOrderInput,
 ) (*mcp.CallToolResult, BuildPlaceConditionalOrderOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, BuildPlaceConditionalOrderOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
-		return nil, BuildPlaceConditionalOrderOutput{}, err
-	}
-	tp, err := h.Deps.Policy.Tenant(tc.TenantID)
+	tp, err := h.authorizeSubaccount(ctx, "build_place_conditional_order", in.SubaccountNumber)
 	if err != nil {
 		return nil, BuildPlaceConditionalOrderOutput{}, err
-	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
-		return nil, BuildPlaceConditionalOrderOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("build_place_conditional_order:" + tc.TenantID) {
-		return nil, BuildPlaceConditionalOrderOutput{}, userErrf("rate limit exceeded")
 	}
 	acc, err := h.Deps.Chain.Account.Account(ctx, tp.Owner)
 	if err != nil {
@@ -187,22 +161,9 @@ type BuildCancelOrderOutput struct {
 func (h *Handlers) BuildCancelOrder(
 	ctx context.Context, _ *mcp.CallToolRequest, in BuildCancelOrderInput,
 ) (*mcp.CallToolResult, BuildCancelOrderOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, BuildCancelOrderOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
-		return nil, BuildCancelOrderOutput{}, err
-	}
-	tp, err := h.Deps.Policy.Tenant(tc.TenantID)
+	tp, err := h.authorizeSubaccount(ctx, "build_cancel_order", in.SubaccountNumber)
 	if err != nil {
 		return nil, BuildCancelOrderOutput{}, err
-	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
-		return nil, BuildCancelOrderOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("build_cancel_order:" + tc.TenantID) {
-		return nil, BuildCancelOrderOutput{}, userErrf("rate limit exceeded")
 	}
 	acc, err := h.Deps.Chain.Account.Account(ctx, tp.Owner)
 	if err != nil {
@@ -250,22 +211,9 @@ type BuildBatchCancelOrdersOutput struct {
 func (h *Handlers) BuildBatchCancelOrders(
 	ctx context.Context, _ *mcp.CallToolRequest, in BuildBatchCancelOrdersInput,
 ) (*mcp.CallToolResult, BuildBatchCancelOrdersOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, BuildBatchCancelOrdersOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
-		return nil, BuildBatchCancelOrdersOutput{}, err
-	}
-	tp, err := h.Deps.Policy.Tenant(tc.TenantID)
+	tp, err := h.authorizeSubaccount(ctx, "build_batch_cancel_orders", in.SubaccountNumber)
 	if err != nil {
 		return nil, BuildBatchCancelOrdersOutput{}, err
-	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
-		return nil, BuildBatchCancelOrdersOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("build_batch_cancel_orders:" + tc.TenantID) {
-		return nil, BuildBatchCancelOrdersOutput{}, userErrf("rate limit exceeded")
 	}
 	acc, err := h.Deps.Chain.Account.Account(ctx, tp.Owner)
 	if err != nil {

@@ -23,15 +23,8 @@ func (h *Handlers) ListMarkets(
 	_ *mcp.CallToolRequest,
 	_ ListMarketsInput,
 ) (*mcp.CallToolResult, ListMarketsOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, ListMarketsOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
+	if _, err := h.authorize(ctx, "list_markets"); err != nil {
 		return nil, ListMarketsOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("list_markets:" + tc.TenantID) {
-		return nil, ListMarketsOutput{}, userErrf("rate limit exceeded")
 	}
 	resp, err := h.Deps.Indexer.ListPerpetualMarkets(ctx)
 	if err != nil {
@@ -54,15 +47,8 @@ func (h *Handlers) GetMarket(
 	_ *mcp.CallToolRequest,
 	in GetMarketInput,
 ) (*mcp.CallToolResult, GetMarketOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetMarketOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
+	if _, err := h.authorize(ctx, "get_market"); err != nil {
 		return nil, GetMarketOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_market:" + tc.TenantID) {
-		return nil, GetMarketOutput{}, userErrf("rate limit exceeded")
 	}
 	m, err := h.Deps.Indexer.GetPerpetualMarket(ctx, in.Ticker)
 	if err != nil {
@@ -85,15 +71,8 @@ func (h *Handlers) GetOrderbook(
 	_ *mcp.CallToolRequest,
 	in GetOrderbookInput,
 ) (*mcp.CallToolResult, GetOrderbookOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetOrderbookOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
+	if _, err := h.authorize(ctx, "get_orderbook"); err != nil {
 		return nil, GetOrderbookOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_orderbook:" + tc.TenantID) {
-		return nil, GetOrderbookOutput{}, userErrf("rate limit exceeded")
 	}
 	ob, err := h.Deps.Indexer.GetOrderbook(ctx, in.Ticker)
 	if err != nil {
@@ -121,15 +100,8 @@ func (h *Handlers) GetOraclePrice(
 	_ *mcp.CallToolRequest,
 	in GetOraclePriceInput,
 ) (*mcp.CallToolResult, GetOraclePriceOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetOraclePriceOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
+	if _, err := h.authorize(ctx, "get_oracle_price"); err != nil {
 		return nil, GetOraclePriceOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_oracle_price:" + tc.TenantID) {
-		return nil, GetOraclePriceOutput{}, userErrf("rate limit exceeded")
 	}
 	mp, err := h.Deps.Chain.PricesQuery.MarketPrice(ctx, in.MarketID)
 	if err != nil {

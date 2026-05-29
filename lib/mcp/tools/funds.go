@@ -28,22 +28,9 @@ func (h *Handlers) BuildDepositToSubaccount(
 	_ *mcp.CallToolRequest,
 	in BuildDepositToSubaccountInput,
 ) (*mcp.CallToolResult, BuildDepositToSubaccountOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, BuildDepositToSubaccountOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
-		return nil, BuildDepositToSubaccountOutput{}, err
-	}
-	tp, err := h.Deps.Policy.Tenant(tc.TenantID)
+	tp, err := h.authorizeSubaccount(ctx, "build_deposit_to_subaccount", in.SubaccountNumber)
 	if err != nil {
 		return nil, BuildDepositToSubaccountOutput{}, err
-	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
-		return nil, BuildDepositToSubaccountOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("build_deposit_to_subaccount:" + tc.TenantID) {
-		return nil, BuildDepositToSubaccountOutput{}, userErrf("rate limit exceeded")
 	}
 
 	// Per-tx cap on deposit (no daily cap — money is coming in, not going out).
@@ -96,22 +83,9 @@ func (h *Handlers) BuildWithdrawFromSubaccount(
 	_ *mcp.CallToolRequest,
 	in BuildWithdrawFromSubaccountInput,
 ) (*mcp.CallToolResult, BuildWithdrawFromSubaccountOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, BuildWithdrawFromSubaccountOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
-		return nil, BuildWithdrawFromSubaccountOutput{}, err
-	}
-	tp, err := h.Deps.Policy.Tenant(tc.TenantID)
+	tp, err := h.authorizeSubaccount(ctx, "build_withdraw_from_subaccount", in.SubaccountNumber)
 	if err != nil {
 		return nil, BuildWithdrawFromSubaccountOutput{}, err
-	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
-		return nil, BuildWithdrawFromSubaccountOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("build_withdraw_from_subaccount:" + tc.TenantID) {
-		return nil, BuildWithdrawFromSubaccountOutput{}, userErrf("rate limit exceeded")
 	}
 
 	// Build-time enforcement is best-effort UX — it gives the caller a fast
@@ -122,7 +96,7 @@ func (h *Handlers) BuildWithdrawFromSubaccount(
 	if err != nil {
 		return nil, BuildWithdrawFromSubaccountOutput{}, fmt.Errorf("human_usdc: %w", err)
 	}
-	if err := limits.Enforce(h.Deps.Limits, h.Deps.WithdrawLedger, tc.TenantID, limits.ToolWithdraw, quantums); err != nil {
+	if err := limits.Enforce(h.Deps.Limits, h.Deps.WithdrawLedger, tp.TenantID, limits.ToolWithdraw, quantums); err != nil {
 		return nil, BuildWithdrawFromSubaccountOutput{}, err
 	}
 
@@ -166,27 +140,18 @@ func (h *Handlers) BuildTransferBetweenSubaccounts(
 	_ *mcp.CallToolRequest,
 	in BuildTransferBetweenSubaccountsInput,
 ) (*mcp.CallToolResult, BuildTransferBetweenSubaccountsOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, BuildTransferBetweenSubaccountsOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
-		return nil, BuildTransferBetweenSubaccountsOutput{}, err
-	}
-	tp, err := h.Deps.Policy.Tenant(tc.TenantID)
+	// Same-owner transfer needs CheckSubaccount on BOTH sender and recipient
+	// with distinct error prefixes — too custom for authorizeSubaccount.
+	// Use the base authorize and inline the two subaccount checks.
+	tp, err := h.authorize(ctx, "build_transfer_between_subaccounts")
 	if err != nil {
 		return nil, BuildTransferBetweenSubaccountsOutput{}, err
 	}
-	// BOTH subaccounts must be in the tenant's allowlist. Same-owner only:
-	// the builder uses tp.Owner for both sender and recipient.
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SenderSubaccountNumber); err != nil {
+	if err := h.Deps.Policy.CheckSubaccount(tp.TenantID, in.SenderSubaccountNumber); err != nil {
 		return nil, BuildTransferBetweenSubaccountsOutput{}, fmt.Errorf("sender: %w", err)
 	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.RecipientSubaccountNumber); err != nil {
+	if err := h.Deps.Policy.CheckSubaccount(tp.TenantID, in.RecipientSubaccountNumber); err != nil {
 		return nil, BuildTransferBetweenSubaccountsOutput{}, fmt.Errorf("recipient: %w", err)
-	}
-	if !h.Deps.RateLimit.Allow("build_transfer_between_subaccounts:" + tc.TenantID) {
-		return nil, BuildTransferBetweenSubaccountsOutput{}, userErrf("rate limit exceeded")
 	}
 
 	// Per-tx cap only (no daily cap — funds stay in the tenant's books).

@@ -27,15 +27,8 @@ type GetCandlesOutput struct {
 func (h *Handlers) GetCandles(
 	ctx context.Context, _ *mcp.CallToolRequest, in GetCandlesInput,
 ) (*mcp.CallToolResult, GetCandlesOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetCandlesOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
+	if _, err := h.authorize(ctx, "get_candles"); err != nil {
 		return nil, GetCandlesOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_candles:" + tc.TenantID) {
-		return nil, GetCandlesOutput{}, userErrf("rate limit exceeded")
 	}
 	resp, err := h.Deps.Indexer.GetCandles(ctx, in.Ticker, indexer.GetCandlesArgs{
 		Resolution: in.Resolution,
@@ -62,15 +55,8 @@ type GetTradesOutput struct {
 func (h *Handlers) GetTrades(
 	ctx context.Context, _ *mcp.CallToolRequest, in GetTradesInput,
 ) (*mcp.CallToolResult, GetTradesOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetTradesOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
+	if _, err := h.authorize(ctx, "get_trades"); err != nil {
 		return nil, GetTradesOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_trades:" + tc.TenantID) {
-		return nil, GetTradesOutput{}, userErrf("rate limit exceeded")
 	}
 	resp, err := h.Deps.Indexer.GetTrades(ctx, in.Ticker, in.Limit)
 	if err != nil {
@@ -91,15 +77,8 @@ type GetSparklinesOutput struct {
 func (h *Handlers) GetSparklines(
 	ctx context.Context, _ *mcp.CallToolRequest, in GetSparklinesInput,
 ) (*mcp.CallToolResult, GetSparklinesOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetSparklinesOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
+	if _, err := h.authorize(ctx, "get_sparklines"); err != nil {
 		return nil, GetSparklinesOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_sparklines:" + tc.TenantID) {
-		return nil, GetSparklinesOutput{}, userErrf("rate limit exceeded")
 	}
 	resp, err := h.Deps.Indexer.GetSparklines(ctx, in.TimePeriod)
 	if err != nil {
@@ -120,15 +99,8 @@ type GetHistoricalFundingOutput struct {
 func (h *Handlers) GetHistoricalFunding(
 	ctx context.Context, _ *mcp.CallToolRequest, in GetHistoricalFundingInput,
 ) (*mcp.CallToolResult, GetHistoricalFundingOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetHistoricalFundingOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
+	if _, err := h.authorize(ctx, "get_historical_funding"); err != nil {
 		return nil, GetHistoricalFundingOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_historical_funding:" + tc.TenantID) {
-		return nil, GetHistoricalFundingOutput{}, userErrf("rate limit exceeded")
 	}
 	resp, err := h.Deps.Indexer.GetHistoricalFunding(ctx, in.Ticker)
 	if err != nil {
@@ -147,15 +119,8 @@ type GetHeightOutput struct {
 func (h *Handlers) GetHeight(
 	ctx context.Context, _ *mcp.CallToolRequest, _ GetHeightInput,
 ) (*mcp.CallToolResult, GetHeightOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetHeightOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
+	if _, err := h.authorize(ctx, "get_height"); err != nil {
 		return nil, GetHeightOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_height:" + tc.TenantID) {
-		return nil, GetHeightOutput{}, userErrf("rate limit exceeded")
 	}
 	resp, err := h.Deps.Indexer.GetHeight(ctx)
 	if err != nil {
@@ -174,15 +139,8 @@ type GetTimeOutput struct {
 func (h *Handlers) GetTime(
 	ctx context.Context, _ *mcp.CallToolRequest, _ GetTimeInput,
 ) (*mcp.CallToolResult, GetTimeOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetTimeOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
+	if _, err := h.authorize(ctx, "get_time"); err != nil {
 		return nil, GetTimeOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_time:" + tc.TenantID) {
-		return nil, GetTimeOutput{}, userErrf("rate limit exceeded")
 	}
 	resp, err := h.Deps.Indexer.GetTime(ctx)
 	if err != nil {

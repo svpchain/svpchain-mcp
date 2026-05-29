@@ -34,22 +34,9 @@ func (h *Handlers) BuildPlaceLimitOrder(
 	_ *mcp.CallToolRequest,
 	in BuildPlaceLimitOrderInput,
 ) (*mcp.CallToolResult, BuildPlaceLimitOrderOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, BuildPlaceLimitOrderOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
-		return nil, BuildPlaceLimitOrderOutput{}, err
-	}
-	tp, err := h.Deps.Policy.Tenant(tc.TenantID)
+	tp, err := h.authorizeSubaccount(ctx, "build_place_limit_order", in.SubaccountNumber)
 	if err != nil {
 		return nil, BuildPlaceLimitOrderOutput{}, err
-	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
-		return nil, BuildPlaceLimitOrderOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("build_place_limit_order:" + tc.TenantID) {
-		return nil, BuildPlaceLimitOrderOutput{}, userErrf("rate limit exceeded")
 	}
 
 	acc, err := h.Deps.Chain.Account.Account(ctx, tp.Owner)

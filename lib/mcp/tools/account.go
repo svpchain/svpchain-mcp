@@ -24,18 +24,12 @@ func (h *Handlers) GetSubaccount(
 	_ *mcp.CallToolRequest,
 	in GetSubaccountInput,
 ) (*mcp.CallToolResult, GetSubaccountOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetSubaccountOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckOwner(tc.TenantID, in.Address); err != nil {
+	tp, err := h.authorizeOwner(ctx, "get_subaccount", in.Address)
+	if err != nil {
 		return nil, GetSubaccountOutput{}, err
 	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
+	if err := h.Deps.Policy.CheckSubaccount(tp.TenantID, in.SubaccountNumber); err != nil {
 		return nil, GetSubaccountOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_subaccount:" + tc.TenantID) {
-		return nil, GetSubaccountOutput{}, userErrf("rate limit exceeded")
 	}
 	sa, err := h.Deps.Indexer.GetSubaccount(ctx, in.Address, in.SubaccountNumber)
 	if err != nil {
@@ -128,18 +122,12 @@ func (h *Handlers) GetLiveSubaccount(
 	_ *mcp.CallToolRequest,
 	in GetLiveSubaccountInput,
 ) (*mcp.CallToolResult, GetLiveSubaccountOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetLiveSubaccountOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckOwner(tc.TenantID, in.Owner); err != nil {
+	tp, err := h.authorizeOwner(ctx, "get_live_subaccount", in.Owner)
+	if err != nil {
 		return nil, GetLiveSubaccountOutput{}, err
 	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
+	if err := h.Deps.Policy.CheckSubaccount(tp.TenantID, in.SubaccountNumber); err != nil {
 		return nil, GetLiveSubaccountOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_live_subaccount:" + tc.TenantID) {
-		return nil, GetLiveSubaccountOutput{}, userErrf("rate limit exceeded")
 	}
 	sub, err := h.Deps.Chain.SubaccountQuery.Subaccount(ctx, in.Owner, in.SubaccountNumber)
 	if err != nil {
@@ -165,6 +153,10 @@ func (h *Handlers) Whoami(
 	_ *mcp.CallToolRequest,
 	_ WhoamiInput,
 ) (*mcp.CallToolResult, WhoamiOutput, error) {
+	// Deliberate exception to the auth helpers: whoami is a tenant
+	// self-introspection escape hatch that must work even when the tenant
+	// is kill-switched (so the operator can see the kill_switch flag set).
+	// Hence no CheckTenant and no RateLimit.Allow here.
 	tc, ok := TenantFrom(ctx)
 	if !ok {
 		return nil, WhoamiOutput{}, ErrNoTenant

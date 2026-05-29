@@ -35,18 +35,12 @@ type GetOrdersOutput struct {
 func (h *Handlers) GetOrders(
 	ctx context.Context, _ *mcp.CallToolRequest, in GetOrdersInput,
 ) (*mcp.CallToolResult, GetOrdersOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetOrdersOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckOwner(tc.TenantID, in.Address); err != nil {
+	tp, err := h.authorizeOwner(ctx, "get_orders", in.Address)
+	if err != nil {
 		return nil, GetOrdersOutput{}, err
 	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
+	if err := h.Deps.Policy.CheckSubaccount(tp.TenantID, in.SubaccountNumber); err != nil {
 		return nil, GetOrdersOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_orders:" + tc.TenantID) {
-		return nil, GetOrdersOutput{}, userErrf("rate limit exceeded")
 	}
 	filters := map[string]string{
 		"status":             in.Status,
@@ -82,18 +76,11 @@ type GetOrderOutput struct {
 func (h *Handlers) GetOrder(
 	ctx context.Context, _ *mcp.CallToolRequest, in GetOrderInput,
 ) (*mcp.CallToolResult, GetOrderOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetOrderOutput{}, ErrNoTenant
-	}
 	// get_order is a single-id lookup; we don't know whose order it is until
-	// after the fetch, so no upfront owner check. The result includes the
-	// owner if the agent wants to cross-check.
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
+	// after the fetch, so no upfront owner / subaccount check. The result
+	// includes the owner if the agent wants to cross-check.
+	if _, err := h.authorize(ctx, "get_order"); err != nil {
 		return nil, GetOrderOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_order:" + tc.TenantID) {
-		return nil, GetOrderOutput{}, userErrf("rate limit exceeded")
 	}
 	out, err := h.Deps.Indexer.GetOrder(ctx, in.OrderID)
 	if err != nil {
@@ -116,18 +103,12 @@ type GetFillsOutput struct {
 func (h *Handlers) GetFills(
 	ctx context.Context, _ *mcp.CallToolRequest, in GetFillsInput,
 ) (*mcp.CallToolResult, GetFillsOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetFillsOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckOwner(tc.TenantID, in.Address); err != nil {
+	tp, err := h.authorizeOwner(ctx, "get_fills", in.Address)
+	if err != nil {
 		return nil, GetFillsOutput{}, err
 	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
+	if err := h.Deps.Policy.CheckSubaccount(tp.TenantID, in.SubaccountNumber); err != nil {
 		return nil, GetFillsOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_fills:" + tc.TenantID) {
-		return nil, GetFillsOutput{}, userErrf("rate limit exceeded")
 	}
 	resp, err := h.Deps.Indexer.GetFills(ctx, in.Address, in.SubaccountNumber, in.Market)
 	if err != nil {
@@ -149,18 +130,12 @@ type GetTransfersOutput struct {
 func (h *Handlers) GetTransfers(
 	ctx context.Context, _ *mcp.CallToolRequest, in GetTransfersInput,
 ) (*mcp.CallToolResult, GetTransfersOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetTransfersOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckOwner(tc.TenantID, in.Address); err != nil {
+	tp, err := h.authorizeOwner(ctx, "get_transfers", in.Address)
+	if err != nil {
 		return nil, GetTransfersOutput{}, err
 	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
+	if err := h.Deps.Policy.CheckSubaccount(tp.TenantID, in.SubaccountNumber); err != nil {
 		return nil, GetTransfersOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_transfers:" + tc.TenantID) {
-		return nil, GetTransfersOutput{}, userErrf("rate limit exceeded")
 	}
 	resp, err := h.Deps.Indexer.GetTransfers(ctx, in.Address, in.SubaccountNumber)
 	if err != nil {
@@ -182,18 +157,12 @@ type GetPnlOutput struct {
 func (h *Handlers) GetPnl(
 	ctx context.Context, _ *mcp.CallToolRequest, in GetPnlInput,
 ) (*mcp.CallToolResult, GetPnlOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetPnlOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckOwner(tc.TenantID, in.Address); err != nil {
+	tp, err := h.authorizeOwner(ctx, "get_pnl", in.Address)
+	if err != nil {
 		return nil, GetPnlOutput{}, err
 	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
+	if err := h.Deps.Policy.CheckSubaccount(tp.TenantID, in.SubaccountNumber); err != nil {
 		return nil, GetPnlOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_pnl:" + tc.TenantID) {
-		return nil, GetPnlOutput{}, userErrf("rate limit exceeded")
 	}
 	resp, err := h.Deps.Indexer.GetPnl(ctx, in.Address, in.SubaccountNumber)
 	if err != nil {
@@ -220,18 +189,12 @@ type GetHistoricalPnlOutput struct {
 func (h *Handlers) GetHistoricalPnl(
 	ctx context.Context, _ *mcp.CallToolRequest, in GetHistoricalPnlInput,
 ) (*mcp.CallToolResult, GetHistoricalPnlOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetHistoricalPnlOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckOwner(tc.TenantID, in.Address); err != nil {
+	tp, err := h.authorizeOwner(ctx, "get_historical_pnl", in.Address)
+	if err != nil {
 		return nil, GetHistoricalPnlOutput{}, err
 	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
+	if err := h.Deps.Policy.CheckSubaccount(tp.TenantID, in.SubaccountNumber); err != nil {
 		return nil, GetHistoricalPnlOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_historical_pnl:" + tc.TenantID) {
-		return nil, GetHistoricalPnlOutput{}, userErrf("rate limit exceeded")
 	}
 	resp, err := h.Deps.Indexer.GetHistoricalPnl(ctx, in.Address, in.SubaccountNumber)
 	if err != nil {
@@ -258,18 +221,12 @@ type GetFundingPaymentsOutput struct {
 func (h *Handlers) GetFundingPayments(
 	ctx context.Context, _ *mcp.CallToolRequest, in GetFundingPaymentsInput,
 ) (*mcp.CallToolResult, GetFundingPaymentsOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetFundingPaymentsOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckOwner(tc.TenantID, in.Address); err != nil {
+	tp, err := h.authorizeOwner(ctx, "get_funding_payments", in.Address)
+	if err != nil {
 		return nil, GetFundingPaymentsOutput{}, err
 	}
-	if err := h.Deps.Policy.CheckSubaccount(tc.TenantID, in.SubaccountNumber); err != nil {
+	if err := h.Deps.Policy.CheckSubaccount(tp.TenantID, in.SubaccountNumber); err != nil {
 		return nil, GetFundingPaymentsOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_funding_payments:" + tc.TenantID) {
-		return nil, GetFundingPaymentsOutput{}, userErrf("rate limit exceeded")
 	}
 	resp, err := h.Deps.Indexer.GetFundingPayments(ctx, in.Address, in.SubaccountNumber)
 	if err != nil {

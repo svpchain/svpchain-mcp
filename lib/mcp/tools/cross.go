@@ -36,17 +36,11 @@ func (h *Handlers) BroadcastSignedTx(
 	_ *mcp.CallToolRequest,
 	in BroadcastSignedTxInput,
 ) (*mcp.CallToolResult, BroadcastSignedTxOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, BroadcastSignedTxOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
+	tp, err := h.authorize(ctx, "broadcast_signed_tx")
+	if err != nil {
 		return nil, BroadcastSignedTxOutput{}, err
 	}
-	if !h.Deps.RateLimit.Allow("broadcast_signed_tx:" + tc.TenantID) {
-		return nil, BroadcastSignedTxOutput{}, userErrf("rate limit exceeded")
-	}
-	if err := h.Deps.Idempotency.Claim(tc.TenantID, in.ClientID); err != nil {
+	if err := h.Deps.Idempotency.Claim(tp.TenantID, in.ClientID); err != nil {
 		return nil, BroadcastSignedTxOutput{}, err
 	}
 
@@ -62,10 +56,6 @@ func (h *Handlers) BroadcastSignedTx(
 	signerAddr, err := h.signerAddressFromTxRaw(rawBytes)
 	if err != nil {
 		return nil, BroadcastSignedTxOutput{}, fmt.Errorf("decode signed tx: %w", err)
-	}
-	tp, err := h.Deps.Policy.Tenant(tc.TenantID)
-	if err != nil {
-		return nil, BroadcastSignedTxOutput{}, err
 	}
 	if signerAddr != tp.Owner {
 		return nil, BroadcastSignedTxOutput{}, fmt.Errorf(
@@ -85,7 +75,7 @@ func (h *Handlers) BroadcastSignedTx(
 		return nil, BroadcastSignedTxOutput{}, fmt.Errorf("inspect tx: %w", err)
 	}
 	if withdrawQ > 0 {
-		if err := limits.Enforce(h.Deps.Limits, h.Deps.WithdrawLedger, tc.TenantID, limits.ToolWithdraw, withdrawQ); err != nil {
+		if err := limits.Enforce(h.Deps.Limits, h.Deps.WithdrawLedger, tp.TenantID, limits.ToolWithdraw, withdrawQ); err != nil {
 			return nil, BroadcastSignedTxOutput{}, err
 		}
 	}
@@ -98,7 +88,7 @@ func (h *Handlers) BroadcastSignedTx(
 		outcome = "chain_reject"
 	}
 	_ = h.Deps.Auditor.Append(policy.AuditEntry{
-		TenantID: tc.TenantID,
+		TenantID: tp.TenantID,
 		Owner:    tp.Owner,
 		Tool:     "broadcast_signed_tx",
 		ClientID: in.ClientID,
@@ -121,7 +111,7 @@ func (h *Handlers) BroadcastSignedTx(
 	// Spend only after the chain accepts the broadcast — a failed CheckTx
 	// doesn't eat the tenant's daily cap.
 	if res.Code == 0 && withdrawQ > 0 && h.Deps.WithdrawLedger != nil {
-		h.Deps.WithdrawLedger.Record(tc.TenantID, withdrawQ)
+		h.Deps.WithdrawLedger.Record(tp.TenantID, withdrawQ)
 	}
 	return nil, BroadcastSignedTxOutput{Result: payload.BroadcastResult{
 		TxHash: res.TxHash,
@@ -210,15 +200,8 @@ func (h *Handlers) GetTxStatus(
 	_ *mcp.CallToolRequest,
 	in GetTxStatusInput,
 ) (*mcp.CallToolResult, GetTxStatusOutput, error) {
-	tc, ok := TenantFrom(ctx)
-	if !ok {
-		return nil, GetTxStatusOutput{}, ErrNoTenant
-	}
-	if err := h.Deps.Policy.CheckTenant(tc.TenantID); err != nil {
+	if _, err := h.authorize(ctx, "get_tx_status"); err != nil {
 		return nil, GetTxStatusOutput{}, err
-	}
-	if !h.Deps.RateLimit.Allow("get_tx_status:" + tc.TenantID) {
-		return nil, GetTxStatusOutput{}, userErrf("rate limit exceeded")
 	}
 	st, err := h.Deps.Chain.CometBft.TxStatus(ctx, in.TxHash)
 	if err != nil {
