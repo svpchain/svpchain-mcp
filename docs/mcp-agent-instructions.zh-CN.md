@@ -115,6 +115,21 @@ svpchain-signer.whoami()
 不一致意味着 signer 加载的密钥不归当前 tenant 所有——后续 build → sign → broadcast
 会失败，且可能误用错误密钥签名。
 
+## 多 signer 共存时的工具选择
+
+用户可能装有多个签名类 MCP server（例如同时装了 svpchain、Ethereum、Solana 的
+signer），客户端会把它们分别命名为 `svpchain-signer__sign_transaction`、
+`ethereum-signer__sign_transaction` 等不同工具。这些工具的输入 schema 看起来可能
+相似（同样接收某种 `payload`），但 **绝不可互换使用**：
+
+- svpchain 的写操作（任何 `svpchain-remote.build_*` 产出的 TxPayload）**必须**经过
+  `svpchain-signer__sign_transaction`。其他链的 signer 即便接受这个 payload，签出的
+  签名也会被 svpchain 链拒绝（不同 chain_id / 不同签名 scheme）。
+- svpchain-signer 启动时已绑定一个 `--chain-id`，对 chain_id 不匹配的 payload 会在
+  签名前拒绝。这是底层保护；选择正确的工具仍然是 agent 的责任。
+- 当不确定哪个是 svpchain 的 signer 时，先 `whoami` —— 只有返回 `svp1…` 前缀且
+  chain_id 与远程 server 一致的，才是 svpchain-signer。
+
 ---
 
 ## 维护说明（非系统提示词内容）
