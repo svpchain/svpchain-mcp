@@ -126,52 +126,57 @@ func Register(srv *mcp.Server, h *Handlers) {
 	}, h.GetFundingPayments)
 
 	// C. Trading (build only — no signing).
+	//
+	// Every build_* tool returns a TxPayload. The canonical write flow is
+	// build_* → sign_transaction (local signer MCP) → broadcast_signed_tx
+	// (this server). Each description names the chain explicitly so an
+	// LLM picking tools from a flat catalog has a clear next-step signal.
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "build_place_limit_order",
-		Description: "Construct (but do not sign) a short-term limit order. Returns a TxPayload to sign locally and pass to broadcast_signed_tx.",
+		Description: "Construct (but do not sign) a short-term limit order. Returns a TxPayload — pass to sign_transaction (local signer) then broadcast_signed_tx to land on chain.",
 	}, h.BuildPlaceLimitOrder)
 
 	// v0.2.2: market / conditional / cancel / batch_cancel.
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "build_place_market_order",
-		Description: "Construct a short-term IOC \"market\" order — an IOC limit at a worst price the caller commits to (explicit worst_price, or derived from oracle_price + slippage_bps).",
+		Description: "Construct a short-term IOC \"market\" order — an IOC limit at a worst price the caller commits to (explicit worst_price, or derived from oracle_price + slippage_bps). Returns a TxPayload — pass to sign_transaction then broadcast_signed_tx.",
 	}, h.BuildPlaceMarketOrder)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "build_place_conditional_order",
-		Description: "Construct a stateful conditional order (STOP_LOSS or TAKE_PROFIT). Activates as a limit order when the oracle crosses trigger_price; expires at good_til_block_time.",
+		Description: "Construct a stateful conditional order (STOP_LOSS or TAKE_PROFIT). Activates as a limit order when the oracle crosses trigger_price; expires at good_til_block_time. Returns a TxPayload — pass to sign_transaction then broadcast_signed_tx.",
 	}, h.BuildPlaceConditionalOrder)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "build_cancel_order",
-		Description: "Construct a cancel for a single open order. order_flags must be set explicitly (0=ShortTerm, 32=Conditional, 64=LongTerm).",
+		Description: "Construct a cancel for a single open order. order_flags must be set explicitly (0=ShortTerm, 32=Conditional, 64=LongTerm). Returns a TxPayload — pass to sign_transaction then broadcast_signed_tx.",
 	}, h.BuildCancelOrder)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "build_batch_cancel_orders",
-		Description: "Construct a batch cancel of short-term orders (chain accepts MsgBatchCancel for short-term only). Accepts (clob_pair_id, client_ids) tuples.",
+		Description: "Construct a batch cancel of short-term orders (chain accepts MsgBatchCancel for short-term only). Accepts (clob_pair_id, client_ids) tuples. Returns a TxPayload — pass to sign_transaction then broadcast_signed_tx.",
 	}, h.BuildBatchCancelOrders)
 
 	// D. Funds movement (v0.2.3).
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "build_deposit_to_subaccount",
-		Description: "Construct a deposit from the owner's bank account into one of their subaccounts (USDC only on svpchain). Per-tx cap enforced if configured.",
+		Description: "Construct a deposit from the owner's bank account into one of their subaccounts (USDC only). Returns a TxPayload — pass to sign_transaction (local signer) then broadcast_signed_tx to land on chain. Per-tx cap enforced if configured.",
 	}, h.BuildDepositToSubaccount)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "build_withdraw_from_subaccount",
-		Description: "Construct a withdraw from the owner's subaccount back into their bank account (USDC only). Per-tx cap + per-tenant daily cap enforced; broadcast_signed_tx re-checks the daily cap as a safety net.",
+		Description: "Construct a withdraw from the owner's subaccount back into their bank account (USDC only). Returns a TxPayload — pass to sign_transaction then broadcast_signed_tx. Per-tx cap + per-tenant daily cap enforced; broadcast_signed_tx re-checks the daily cap as a safety net.",
 	}, h.BuildWithdrawFromSubaccount)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "build_transfer_between_subaccounts",
-		Description: "Construct a USDC transfer between two subaccounts under the same owner. v0.2.3 is same-owner only; cross-owner transfers are deferred until a future version with the right cap surface.",
+		Description: "Construct a USDC transfer between two subaccounts under the same owner. Returns a TxPayload — pass to sign_transaction then broadcast_signed_tx. v0.2.3 is same-owner only; cross-owner transfers are deferred until a future version with the right cap surface.",
 	}, h.BuildTransferBetweenSubaccounts)
 
 	// E. Cross-cutting.
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "broadcast_signed_tx",
-		Description: "Broadcast a tx signed locally by the MCP client. Server verifies signer address matches tenant owner before broadcasting.",
+		Description: "Broadcast a tx signed locally by the MCP client — typically the SignedTx returned by sign_transaction on the local signer MCP server. Verifies the embedded signer address matches the tenant owner before broadcasting.",
 	}, h.BroadcastSignedTx)
 
 	mcp.AddTool(srv, &mcp.Tool{
