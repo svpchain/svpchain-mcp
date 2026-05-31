@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -28,6 +29,7 @@ func run() error {
 	inPath := flag.String("in", "", "path to TxPayload JSON (default: stdin)")
 	outPath := flag.String("out", "", "path to write SignedTx JSON (default: stdout)")
 	keyHex := flag.String("key-hex", "", "32-byte hex private key (no 0x prefix required; also reads DEVSIGN_KEY_HEX env)")
+	signChallenge := flag.String("sign-challenge", "", "if set, sign this text as a self-service-auth challenge and emit base64 signature to stdout (TxPayload mode is skipped)")
 	flag.Parse()
 
 	if *keyHex == "" {
@@ -40,6 +42,19 @@ func run() error {
 	priv, err := signer.ParsePrivKey(*keyHex)
 	if err != nil {
 		return fmt.Errorf("parse key: %w", err)
+	}
+
+	// --sign-challenge mode: bypass TxPayload parsing and emit a base64
+	// signature over the challenge text. Used by the e2e to drive
+	// auth_challenge → auth_verify without standing up mcp-signer over
+	// stdio.
+	if *signChallenge != "" {
+		sig, err := priv.Sign([]byte(*signChallenge))
+		if err != nil {
+			return fmt.Errorf("sign challenge: %w", err)
+		}
+		fmt.Println(base64.StdEncoding.EncodeToString(sig))
+		return nil
 	}
 
 	pInput, err := readInput(*inPath)

@@ -9,6 +9,7 @@ import (
 	"cosmossdk.io/log"
 
 	"github.com/dydxprotocol/v4-chain/protocol/app"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
@@ -18,6 +19,25 @@ import (
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/policy"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/tools"
 )
+
+// dynamicTenantAdapter wraps auth.DynamicTenantStore to satisfy
+// policy.DynamicSource — converts auth.TenantRecord (which auth knows
+// about) into policy.TenantPolicy (which the policy engine wants). Kept
+// in main to keep auth from importing policy (and vice versa).
+type dynamicTenantAdapter struct{ store *auth.DynamicTenantStore }
+
+func (a dynamicTenantAdapter) LookupTenantPolicy(tenantID string) (policy.TenantPolicy, bool) {
+	rec, err := a.store.LookupByTenantID(tenantID)
+	if err != nil {
+		return policy.TenantPolicy{}, false
+	}
+	return policy.TenantPolicy{
+		TenantID:           rec.TenantID,
+		Owner:              rec.Owner,
+		AllowedSubaccounts: rec.AllowedSubaccounts,
+		KillSwitch:         rec.KillSwitch,
+	}, true
+}
 
 // BuildServer wires the configuration into a ready-to-run Server: dials
 // the chain gRPC, builds the Indexer client, sets up the markets cache,
@@ -51,25 +71,9 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 	idx := indexer.NewClient(cfg.IndexerBaseURL, indexer.Options{})
 	mkts := markets.NewCache(idx, chainDeps.ClobQuery, time.Duration(cfg.Cache.MarketsRefresh), logger)
 
-	// Policy: build per-tenant table and the bearer-token lookup tables
-	// the auth middleware uses.
-	tenants := make([]policy.TenantPolicy, 0, len(cfg.Tenants))
-	tokenToTenant := make(map[string]string, len(cfg.Tenants))
-	tenantToOwner := make(map[string]string, len(cfg.Tenants))
-	for _, t := range cfg.Tenants {
-		allow := make(map[uint32]struct{}, len(t.AllowedSubaccounts))
-		for _, s := range t.AllowedSubaccounts {
-			allow[s] = struct{}{}
-		}
-		tenants = append(tenants, policy.TenantPolicy{
-			TenantID:           t.TenantID,
-			Owner:              t.Owner,
-			AllowedSubaccounts: allow,
-			KillSwitch:         t.KillSwitch,
-		})
-		tokenToTenant[t.BearerToken] = t.TenantID
-		tenantToOwner[t.TenantID] = t.Owner
-	}
+	// v0.3 dropped the static [[tenants]] table — every tenant is
+	// auto-issued at runtime via the auth_challenge → auth_verify flow,
+	// so the policy engine starts empty and is populated dynamically.
 
 	// Funds-tool safety rails: caps come straight from cfg.Limits; the
 	// withdraw ledger is in-memory, keyed by tenant_id, and resets on
@@ -83,22 +87,41 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 	}
 	withdrawLedger := limits.NewMemoryLedger(limitsCfg.DailyWithdrawCapUSDC, nil)
 
+	// v0.3 self-service auth state. Both stores are in-memory + TTL-
+	// bounded; the durable backend lands alongside the durable withdraw
+	// ledger. Auto-issued tenants inherit a fixed allowlist of subaccount
+	// numbers (v0.3.0 ships 0..9; per-user negotiation deferred).
+	nonceStore := auth.NewNonceStore(auth.DefaultChallengeTTL, nil)
+	dynamicTenants := auth.NewDynamicTenantStore(auth.DynamicTenantStoreConfig{
+		BearerTTL:                 auth.DefaultBearerTTL,
+		DefaultAllowedSubaccounts: []uint32{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
+	}, nil)
+	ipLimit := auth.NewIPRateLimiter(auth.DefaultIPChallengeRate, auth.DefaultIPChallengeWindow, nil)
+	sessionBearers := auth.NewSessionBearers(auth.DefaultBearerTTL, nil)
+
+	policyEngine := policy.NewEngine(nil)
+	policyEngine.SetDynamicSource(dynamicTenantAdapter{store: dynamicTenants})
+
 	deps := tools.Deps{
 		Chain:             chainDeps,
 		Indexer:           idx,
 		Markets:           mkts,
 		Builder:           builder.NewAssembler(cfg.ChainID),
-		Policy:            policy.NewEngine(tenants),
+		Policy:            policyEngine,
 		Auditor:           policy.NewStdoutAuditor(),
 		Idempotency:       policy.NewIdempotency(0),
 		RateLimit:         policy.NewRateLimiter(0, 0),
 		Limits:            limitsCfg,
 		WithdrawLedger:    withdrawLedger,
+		NonceStore:        nonceStore,
+		DynamicTenants:    dynamicTenants,
+		IPChallengeLimit:  ipLimit,
+		SessionBearers:    sessionBearers,
 		Logger:            logger,
 		InterfaceRegistry: encCfg.InterfaceRegistry,
 		BroadcastMode:     cfg.BroadcastMode,
 	}
 	handlers := tools.New(cfg.ChainID, deps)
 
-	return NewServer(cfg, handlers, grpcConn, mkts, logger, tokenToTenant, tenantToOwner), nil
+	return NewServer(cfg, handlers, grpcConn, mkts, logger, dynamicTenants, sessionBearers), nil
 }

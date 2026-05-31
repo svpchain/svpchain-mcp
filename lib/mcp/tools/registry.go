@@ -183,4 +183,18 @@ func Register(srv *mcp.Server, h *Handlers) {
 		Name:        "get_tx_status",
 		Description: "Poll CometBFT for the status of a previously broadcast tx by hash.",
 	}, h.GetTxStatus)
+
+	// F. Self-service auth (v0.3). The auth_challenge → sign_challenge
+	// (local signer) → auth_verify flow mints a bearer token bound to
+	// the signing key's owner address. These two tools deliberately
+	// bypass tenant authorization — they ARE the mechanism.
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "auth_challenge",
+		Description: "Issue a nonce + signed-challenge text for self-service auth. Pass the returned challenge to sign_challenge on the local signer, then pass nonce + signature to auth_verify. Rate-limited per IP.",
+	}, h.AuthChallenge)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "auth_verify",
+		Description: "Verify a signature over a previously-issued challenge nonce; if it recovers to the same address the nonce was issued for, mint a bearer token bound to that owner. Use the returned bearer_token in the Authorization header for every subsequent request until expires_at.",
+	}, h.AuthVerify)
 }

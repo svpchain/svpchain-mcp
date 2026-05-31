@@ -18,18 +18,14 @@ indexer_base_url = "http://127.0.0.1:3002"
 listen_addr      = "127.0.0.1:8765"
 broadcast_mode   = "server"
 
-[auth]
-mode = "bearer"
-
 [cache]
 markets_refresh = "30s"
 
-[[tenants]]
-tenant_id           = "alice"
-bearer_token        = "dev-token-alice"
-owner               = "svp1alicelocaldemoaddress"
-allowed_subaccounts = [0]
-kill_switch         = false
+[limits]
+deposit_max_usdc       = 1000
+withdraw_max_usdc      = 500
+transfer_max_usdc      = 500
+daily_withdraw_cap_usdc = 100
 `
 
 func writeTempConfig(t *testing.T, body string) string {
@@ -48,18 +44,12 @@ func TestLoadConfig_HappyPath(t *testing.T) {
 	require.Equal(t, "127.0.0.1:9090", cfg.GrpcAddr)
 	require.Equal(t, "127.0.0.1:8765", cfg.ListenAddr)
 	require.Equal(t, "server", cfg.BroadcastMode)
-	require.Equal(t, "bearer", cfg.Auth.Mode)
 	require.Equal(t, Duration(30*time.Second), cfg.Cache.MarketsRefresh)
-
-	require.Len(t, cfg.Tenants, 1)
-	require.Equal(t, "alice", cfg.Tenants[0].TenantID)
-	require.Equal(t, []uint32{0}, cfg.Tenants[0].AllowedSubaccounts)
-	require.False(t, cfg.Tenants[0].KillSwitch)
+	require.EqualValues(t, 1000, cfg.Limits.DepositMaxUSDC)
 }
 
 func TestLoadConfig_DefaultsBroadcastMode(t *testing.T) {
-	body := validConfigTOML // remove broadcast_mode by overriding
-	body = stripLine(body, "broadcast_mode")
+	body := stripLine(validConfigTOML, "broadcast_mode")
 	cfg, err := LoadConfig(writeTempConfig(t, body))
 	require.NoError(t, err)
 	require.Equal(t, "server", cfg.BroadcastMode, "should default to server-broadcast")
@@ -85,19 +75,6 @@ func TestLoadConfig_Rejects(t *testing.T) {
 			name:        "missing listen_addr",
 			body:        stripLine(validConfigTOML, "listen_addr"),
 			expectError: "listen_addr is required",
-		},
-		{
-			name: "missing tenants",
-			body: `
-chain_id         = "x"
-grpc_addr        = "x"
-comet_rpc_url    = "x"
-indexer_base_url = "x"
-listen_addr      = "x"
-[auth]
-mode = "bearer"
-`,
-			expectError: "at least one [[tenants]] entry is required",
 		},
 	}
 	for _, tc := range cases {

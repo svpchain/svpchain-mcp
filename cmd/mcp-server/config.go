@@ -8,8 +8,11 @@ import (
 )
 
 // Config is the full server configuration loaded from a TOML file.
-// v0.1 keeps it deliberately small; v0.2 adds per-tool caps,
-// withdraw allowlists, mTLS paths, etc.
+//
+// v0.3 dropped the static [[tenants]] table: tenant identity is now
+// established at runtime via the auth_challenge → sign_challenge →
+// auth_verify self-service flow. Operators no longer pre-provision per-
+// user entries.
 type Config struct {
 	ChainID        string `toml:"chain_id"`
 	GrpcAddr       string `toml:"grpc_addr"`
@@ -17,15 +20,13 @@ type Config struct {
 	IndexerBaseURL string `toml:"indexer_base_url"`
 	ListenAddr     string `toml:"listen_addr"`
 
-	// BroadcastMode is informational for whoami in v0.1. The server always
-	// broadcasts the signed tx the client returns; "local" mode (where the
-	// client broadcasts directly) is documented for v0.3+ in the design.
+	// BroadcastMode is informational for whoami. The server always
+	// broadcasts the signed tx the client returns; "local" mode (where
+	// the client broadcasts directly) is documented for a future version.
 	BroadcastMode string `toml:"broadcast_mode"`
 
-	Auth    AuthConfig     `toml:"auth"`
-	Cache   CacheConfig    `toml:"cache"`
-	Limits  LimitsConfig   `toml:"limits"`
-	Tenants []TenantConfig `toml:"tenants"`
+	Cache  CacheConfig  `toml:"cache"`
+	Limits LimitsConfig `toml:"limits"`
 }
 
 // LimitsConfig caps the size of funds movements. All values are in human
@@ -40,23 +41,10 @@ type LimitsConfig struct {
 	DailyWithdrawCapUSDC uint64 `toml:"daily_withdraw_cap_usdc"`
 }
 
-type AuthConfig struct {
-	Mode string `toml:"mode"` // "bearer" in v0.1
-}
-
 type CacheConfig struct {
 	// MarketsRefresh is parsed as a Go duration string ("60s", "2m"…).
 	// Zero (or unset) means use the package default in markets.NewCache.
 	MarketsRefresh Duration `toml:"markets_refresh"`
-}
-
-// TenantConfig binds a bearer token to an owner + subaccount allowlist.
-type TenantConfig struct {
-	TenantID           string   `toml:"tenant_id"`
-	BearerToken        string   `toml:"bearer_token"`
-	Owner              string   `toml:"owner"`
-	AllowedSubaccounts []uint32 `toml:"allowed_subaccounts"`
-	KillSwitch         bool     `toml:"kill_switch"`
 }
 
 // Duration parses TOML strings like "60s" into a time.Duration via
@@ -88,8 +76,10 @@ func LoadConfig(path string) (*Config, error) {
 	return &c, nil
 }
 
-// Validate enforces v0.1's required fields and uniqueness invariants
-// (bearer tokens and tenant ids must each be unique).
+// Validate enforces the required network-level fields. v0.3 removed the
+// static [[tenants]] table — tenant identity is established at runtime
+// via self-service auth, so the config only needs to describe how to
+// reach the chain + the safety caps.
 func (c *Config) Validate() error {
 	if c.ChainID == "" {
 		return fmt.Errorf("chain_id is required")
@@ -105,36 +95,6 @@ func (c *Config) Validate() error {
 	}
 	if c.ListenAddr == "" {
 		return fmt.Errorf("listen_addr is required")
-	}
-	if c.Auth.Mode != "bearer" {
-		return fmt.Errorf("auth.mode must be \"bearer\" in v0.1 (got %q)", c.Auth.Mode)
-	}
-	if len(c.Tenants) == 0 {
-		return fmt.Errorf("at least one [[tenants]] entry is required")
-	}
-	seenID := map[string]struct{}{}
-	seenToken := map[string]struct{}{}
-	for i, t := range c.Tenants {
-		if t.TenantID == "" {
-			return fmt.Errorf("tenants[%d].tenant_id is required", i)
-		}
-		if _, dup := seenID[t.TenantID]; dup {
-			return fmt.Errorf("duplicate tenant_id %q", t.TenantID)
-		}
-		seenID[t.TenantID] = struct{}{}
-		if t.BearerToken == "" {
-			return fmt.Errorf("tenants[%d].bearer_token is required", i)
-		}
-		if _, dup := seenToken[t.BearerToken]; dup {
-			return fmt.Errorf("duplicate bearer_token (collision in tenants[%d])", i)
-		}
-		seenToken[t.BearerToken] = struct{}{}
-		if t.Owner == "" {
-			return fmt.Errorf("tenants[%d].owner is required", i)
-		}
-		if len(t.AllowedSubaccounts) == 0 {
-			return fmt.Errorf("tenants[%d].allowed_subaccounts must be non-empty", i)
-		}
 	}
 	return nil
 }

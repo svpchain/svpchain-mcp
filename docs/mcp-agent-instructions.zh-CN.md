@@ -51,6 +51,28 @@ prompt / rules」位置：
 - 签名 / 广播：`sign_transaction`（本地 signer）、`broadcast_signed_tx`、
   `get_tx_status`
 
+## 会话初始化：自助式认证
+
+v0.3 起远程 server 不再由运营方预置 tenant；每个新会话**必须**先完成自助式
+认证才能调用任何带 tenant 上下文的工具。流程固定为三步：
+
+```
+1. svpchain-remote.auth_challenge(owner: "<svp1...>") → {challenge, nonce, expires_at}
+2. svpchain-signer.sign_challenge(challenge: <text>)  → {signature, owner}
+3. svpchain-remote.auth_verify(nonce, signature)      → {bearer_token, owner, expires_at}
+```
+
+注意：
+
+- 调用 `auth_verify` 后，远程 server **会把 bearer 绑到当前 MCP session id 上**。
+  之后同一 session 内的所有调用都自动带上 tenant 上下文；不需要、也无法
+  让 MCP 客户端在请求头里另外塞 bearer。
+- bearer 有效期 24h；到期后再走一次以上三步即可。
+- 调用 `auth_challenge` 提供的 `owner` 必须与本地 signer 实际持有的密钥地址一致，
+  否则 `auth_verify` 会在比对恢复出的地址时拒绝。开会话时先并行调一次
+  `svpchain-remote.whoami()` 与 `svpchain-signer.whoami()`，确认两边返回的
+  `owner` 相同；不一致就停止任何写操作。
+
 ## 写链路标准流程
 
 **任何**链上写操作必须按如下三步顺序完成，不得跳步、不得换序：

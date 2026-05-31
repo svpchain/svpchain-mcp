@@ -10,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/grpc"
 
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/tools"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/transport"
@@ -26,12 +27,16 @@ type Server struct {
 	grpcConn  *grpc.ClientConn
 	logger    log.Logger
 
-	tokenToTenant map[string]string
-	tenantToOwner map[string]string
+	// dynamicTenants is the only tenant source in v0.3 — populated on the
+	// fly by the auth_challenge → auth_verify flow. Bearers are looked
+	// up directly against this store; LookupTenantByToken has no other
+	// path.
+	dynamicTenants *auth.DynamicTenantStore
+	sessionBearers *auth.SessionBearers
 }
 
-// NewServer constructs a Server. It registers the v0.1 tools onto a new
-// mcp.Server, wraps the Streamable HTTP handler with bearer-token auth
+// NewServer constructs a Server. Registers all tools onto a new
+// mcp.Server, wraps the Streamable HTTP handler with the auth
 // middleware, and binds the result to cfg.ListenAddr.
 func NewServer(
 	cfg *Config,
@@ -39,7 +44,8 @@ func NewServer(
 	grpcConn *grpc.ClientConn,
 	mkts *markets.Cache,
 	logger log.Logger,
-	tokenToTenant, tenantToOwner map[string]string,
+	dynamicTenants *auth.DynamicTenantStore,
+	sessionBearers *auth.SessionBearers,
 ) *Server {
 	mcpSrv := mcp.NewServer(&mcp.Implementation{
 		Name:    "svpchain-mcp",
@@ -48,35 +54,46 @@ func NewServer(
 	tools.Register(mcpSrv, handlers)
 
 	s := &Server{
-		cfg:           cfg,
-		mcpServer:     mcpSrv,
-		markets:       mkts,
-		grpcConn:      grpcConn,
-		logger:        logger,
-		tokenToTenant: tokenToTenant,
-		tenantToOwner: tenantToOwner,
+		cfg:            cfg,
+		mcpServer:      mcpSrv,
+		markets:        mkts,
+		grpcConn:       grpcConn,
+		logger:         logger,
+		dynamicTenants: dynamicTenants,
+		sessionBearers: sessionBearers,
 	}
 
-	// Streamable HTTP handler. The per-request callback returns the same
-	// MCP server for every request; tenant identity is carried through the
-	// request context by the auth middleware.
+	// Auth runs at the MCP layer, not the HTTP layer: the go-sdk's
+	// StreamableHTTP transport captures req.Context() only at the
+	// initialize call, so per-request ctx mutations from an HTTP
+	// middleware never reach the handler. The receiving middleware
+	// here reads each call's headers from req.Extra.Header instead.
+	// See mcp_auth.go for the full rationale.
+	mcpSrv.AddReceivingMiddleware(authReceivingMiddleware(s, sessionBearers))
+
+	// Streamable HTTP handler. The HTTP-layer wrapper now does one
+	// thing only — stamp the client IP into a synthetic header so the
+	// MCP receiving middleware can read it (r.RemoteAddr doesn't reach
+	// req.Extra otherwise). See auth.go.
 	rawHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 		return mcpSrv
 	}, nil)
-	authed := bearerAuthMiddleware(s, rawHandler)
-	s.transport = transport.NewServer(cfg.ListenAddr, authed, logger)
+	s.transport = transport.NewServer(cfg.ListenAddr, ipMiddleware(rawHandler), logger)
 
 	return s
 }
 
 // LookupTenantByToken implements tenantLookup for the auth middleware.
+// v0.3 only knows about dynamic tenants — bearers are minted by
+// auth_verify and live in the dynamic store. An unknown bearer simply
+// fails to resolve; downstream handlers reject the request because
+// TenantFrom returns ok=false.
 func (s *Server) LookupTenantByToken(token string) (tools.TenantContext, bool) {
-	tenantID, ok := s.tokenToTenant[token]
-	if !ok {
+	rec, err := s.dynamicTenants.LookupByBearer(token)
+	if err != nil {
 		return tools.TenantContext{}, false
 	}
-	owner := s.tenantToOwner[tenantID]
-	return tools.TenantContext{TenantID: tenantID, Owner: owner}, true
+	return tools.TenantContext{TenantID: rec.TenantID, Owner: rec.Owner}, true
 }
 
 // Run starts the markets cache refresher and the HTTP server, then blocks

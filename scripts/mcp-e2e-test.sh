@@ -332,13 +332,10 @@ withdraw_max_usdc      = 500
 transfer_max_usdc      = 500
 daily_withdraw_cap_usdc = 5
 
-[[tenants]]
-tenant_id           = "e2e"
-bearer_token        = "$TENANT_TOKEN"
-owner               = "$OWNER_ADDR"
-# Includes both 0 and 1 so the same-owner transfer phase has a destination.
-allowed_subaccounts = [0, 1]
-kill_switch         = false
+# v0.3 dropped [[tenants]] — tenants are auto-issued at runtime via
+# the auth_challenge → sign_challenge → auth_verify flow. The bearer
+# this e2e ends up using is obtained dynamically in step 5.5 below,
+# not from this file.
 EOF
 pass "config written"
 
@@ -349,10 +346,10 @@ step "Start mcp-server"
 MCP_PID=$!
 info "pid=$MCP_PID, logs=$WORKDIR/mcp.log"
 
-# Wait for the listener to come up (~3s max).
+# Wait for the listener to come up (~3s max). auth_* tools run without
+# a bearer so we can probe readiness without having minted one yet.
 for i in $(seq 1 30); do
-  if curl -fsS -H "Authorization: Bearer $TENANT_TOKEN" \
-              -H "Content-Type: application/json" \
+  if curl -fsS -H "Content-Type: application/json" \
               -d '{"jsonrpc":"2.0","id":0,"method":"tools/list"}' \
               "http://$LISTEN_ADDR/" >/dev/null 2>&1; then
     pass "listening on http://$LISTEN_ADDR (took $((i * 100)) ms)"
@@ -374,9 +371,38 @@ done
 step "MCP initialize handshake"
 mcp_init
 
+# ---- 6.5. self-service auth (v0.3) ----------------------------------------
+# Replaces the static [[tenants]] table that v0.2.x carried in mcp.toml.
+# Flow: auth_challenge(owner) → devsign --sign-challenge → auth_verify
+# (nonce + signature) → bearer. The bearer is bound to our MCP session
+# id so subsequent calls don't need to send Authorization explicitly;
+# we also set TENANT_TOKEN to it as a belt-and-suspenders measure (the
+# mcp_call helper continues to send the header).
+
+step "self-service auth: auth_challenge"
+AUTH_CH=$(mcp_call 900 "auth_challenge" "$(jq -nc --arg o "$OWNER_ADDR" '{owner: $o}')")
+AUTH_NONCE=$(jq -r '.result.structuredContent.nonce' <<<"$AUTH_CH")
+AUTH_TEXT=$(jq -r '.result.structuredContent.challenge' <<<"$AUTH_CH")
+[[ -n "$AUTH_NONCE" && -n "$AUTH_TEXT" ]] || { echo "$AUTH_CH" | jq . >&2; fail "auth_challenge returned empty fields"; }
+pass "nonce issued: ${AUTH_NONCE:0:16}…"
+
+step "self-service auth: sign the challenge with devsign"
+AUTH_SIG=$(./build/devsign --sign-challenge "$AUTH_TEXT")
+[[ -n "$AUTH_SIG" ]] || fail "devsign --sign-challenge produced no output"
+pass "challenge signed"
+
+step "self-service auth: auth_verify"
+AUTH_VF=$(mcp_call 901 "auth_verify" "$(jq -nc --arg n "$AUTH_NONCE" --arg s "$AUTH_SIG" '{nonce: $n, signature: $s}')")
+TENANT_TOKEN=$(jq -r '.result.structuredContent.bearer_token' <<<"$AUTH_VF")
+AUTH_OWNER=$(jq -r '.result.structuredContent.owner' <<<"$AUTH_VF")
+[[ -n "$TENANT_TOKEN" ]] || { echo "$AUTH_VF" | jq . >&2; fail "auth_verify returned empty bearer_token"; }
+[[ "$AUTH_OWNER" == "$OWNER_ADDR" ]] || fail "auth_verify owner mismatch: got $AUTH_OWNER, want $OWNER_ADDR"
+pass "bearer obtained (24h TTL); session is bound for subsequent calls"
+
 # Expected tool count tracks the registry. v0.1 = 10, v0.2.1 = 23,
-# v0.2.2 = 27, v0.2.3 = 30 (funds tools + dual-enforcement broadcast).
-EXPECTED_TOOLS="${EXPECTED_TOOLS:-30}"
+# v0.2.2 = 27, v0.2.3 = 30 (funds tools + dual-enforcement broadcast),
+# v0.3 = 32 (+ auth_challenge + auth_verify).
+EXPECTED_TOOLS="${EXPECTED_TOOLS:-32}"
 step "tools/list (expecting ${EXPECTED_TOOLS} tools)"
 LIST=$(mcp_call 1 "tools/list")
 COUNT=$(jq -r '.result.tools | length' <<<"$LIST")

@@ -4,6 +4,7 @@ import (
 	"cosmossdk.io/log"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
@@ -42,6 +43,15 @@ type Deps struct {
 	// without touching handler code).
 	Limits         limits.Config
 	WithdrawLedger limits.WithdrawLedger
+
+	// Self-service auth backend (v0.3). NonceStore + DynamicTenants are
+	// populated by auth_challenge / auth_verify; IPChallengeLimit caps
+	// auth_challenge per-IP since the tool runs before any tenant
+	// context is established.
+	NonceStore        *auth.NonceStore
+	DynamicTenants    *auth.DynamicTenantStore
+	IPChallengeLimit  *auth.IPRateLimiter
+	SessionBearers    *auth.SessionBearers
 
 	Logger log.Logger
 
