@@ -168,6 +168,8 @@ services:
     image: ${image_ref}
     container_name: ${container_name}
     restart: unless-stopped
+    # network_mode: host — listener binds to 0.0.0.0:${listen_port} (compose
+    # \`ports:\` is ignored in host mode; the interface/port live in mcp.toml).
     network_mode: host
     volumes:
       - ${install_dir}/mcp.toml:/etc/svpchain-mcp/mcp.toml:ro
