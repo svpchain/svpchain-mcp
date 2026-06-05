@@ -32,13 +32,29 @@ const DefaultPayloadTTL = 30 * time.Second
 // (with its own pubkey) and computes sign-bytes itself. v0.2 will
 // precompute AuthInfo and sign-bytes when the tenant config carries the
 // signer's pubkey.
+//
+// feeDenom/feeAmount/gasLimit are the gas fee stamped onto non-CLOB txs.
+// Short-term CLOB orders are gas-free and always get an empty fee (see
+// Assemble); the fee fields only matter for everything else.
 type Assembler struct {
-	chainID string
+	chainID   string
+	feeDenom  string
+	feeAmount string
+	gasLimit  uint64
 }
 
-// NewAssembler returns an Assembler bound to a chain id.
-func NewAssembler(chainID string) *Assembler {
-	return &Assembler{chainID: chainID}
+// NewAssembler returns an Assembler bound to a chain id and the gas fee to
+// apply to non-CLOB txs. A zero gasLimit falls back to ClobGasLimit.
+func NewAssembler(chainID, feeDenom, feeAmount string, gasLimit uint64) *Assembler {
+	if gasLimit == 0 {
+		gasLimit = ClobGasLimit
+	}
+	return &Assembler{
+		chainID:   chainID,
+		feeDenom:  feeDenom,
+		feeAmount: feeAmount,
+		gasLimit:  gasLimit,
+	}
 }
 
 // Args bundles the per-build inputs.
@@ -59,6 +75,13 @@ func (a *Assembler) Assemble(args Args) (*payload.TxPayload, error) {
 	if err != nil {
 		return nil, err
 	}
+	isShortTermCLOB := IsShortTermClobMsgs(args.Msgs)
+	// Short-term CLOB orders are gas-free on svpchain; everything else pays
+	// the configured fee or the chain rejects with code 13 (insufficient fee).
+	feeAmount := []payload.Coin{}
+	if !isShortTermCLOB {
+		feeAmount = []payload.Coin{{Denom: a.feeDenom, Amount: a.feeAmount}}
+	}
 	return &payload.TxPayload{
 		Version:         payload.CurrentVersion,
 		ClientID:        args.ClientID,
@@ -66,11 +89,11 @@ func (a *Assembler) Assemble(args Args) (*payload.TxPayload, error) {
 		SignerAddress:   args.SignerAddress,
 		AccountNumber:   strconv.FormatUint(args.AccountNumber, 10),
 		Sequence:        strconv.FormatUint(args.Sequence, 10),
-		IsShortTermCLOB: IsShortTermClobMsgs(args.Msgs),
+		IsShortTermCLOB: isShortTermCLOB,
 		TxBodyBytesB64:  base64.StdEncoding.EncodeToString(bodyBytes),
 		Fee: payload.Fee{
-			GasLimit: strconv.FormatUint(ClobGasLimit, 10),
-			Amount:   []payload.Coin{}, // CLOB: empty
+			GasLimit: strconv.FormatUint(a.gasLimit, 10),
+			Amount:   feeAmount,
 		},
 		Summary:   args.Summary,
 		ExpiresAt: time.Now().UTC().Add(DefaultPayloadTTL),

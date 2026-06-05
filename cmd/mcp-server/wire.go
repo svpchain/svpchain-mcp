@@ -106,7 +106,7 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 		Chain:             chainDeps,
 		Indexer:           idx,
 		Markets:           mkts,
-		Builder:           builder.NewAssembler(cfg.ChainID),
+		Builder:           builder.NewAssembler(cfg.ChainID, cfg.Fee.Denom, cfg.Fee.Amount, cfg.Fee.GasLimit),
 		Policy:            policyEngine,
 		Auditor:           policy.NewStdoutAuditor(),
 		Idempotency:       policy.NewIdempotency(0),

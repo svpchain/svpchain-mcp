@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"cosmossdk.io/math"
 	"github.com/BurntSushi/toml"
 )
 
@@ -27,6 +28,23 @@ type Config struct {
 
 	Cache  CacheConfig  `toml:"cache"`
 	Limits LimitsConfig `toml:"limits"`
+	Fee    FeeConfig    `toml:"fee"`
+}
+
+// FeeConfig sets the gas fee stamped onto non-CLOB txs (deposit / withdraw /
+// transfer / conditional orders / long-term cancels / broadcast). Short-term
+// CLOB orders are gas-free on svpchain and always ship with an empty fee
+// regardless of this config — see builder.Assemble.
+//
+// The chain's required fee comes from the node's minimum-gas-prices (operator
+// config, not queryable via gRPC), so it's configured here. Amount is the
+// total fee at GasLimit, kept as a string to preserve the full uint range.
+// Defaults (asvp, 25000000000000000, 1_000_000) satisfy a chain whose
+// minimum-gas-prices is 25000000000asvp at a 1,000,000 gas limit.
+type FeeConfig struct {
+	Denom    string `toml:"denom"`
+	Amount   string `toml:"amount"`
+	GasLimit uint64 `toml:"gas_limit"`
 }
 
 // LimitsConfig caps the size of funds movements. All values are in human
@@ -70,6 +88,7 @@ func LoadConfig(path string) (*Config, error) {
 	if c.BroadcastMode == "" {
 		c.BroadcastMode = "server"
 	}
+	c.Fee.applyDefaults()
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
@@ -95,6 +114,50 @@ func (c *Config) Validate() error {
 	}
 	if c.ListenAddr == "" {
 		return fmt.Errorf("listen_addr is required")
+	}
+	if err := c.Fee.validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// DefaultFeeDenom / DefaultFeeAmount / DefaultFeeGasLimit are the fee applied
+// to non-CLOB txs when the [fee] section is absent. They match a chain whose
+// minimum-gas-prices is 25000000000asvp evaluated at a 1,000,000 gas limit
+// (≈0.025 SVP total).
+const (
+	DefaultFeeDenom    = "asvp"
+	DefaultFeeAmount   = "25000000000000000"
+	DefaultFeeGasLimit = uint64(1_000_000)
+)
+
+// applyDefaults fills unset fields so an operator can omit the whole [fee]
+// section and still produce broadcastable non-CLOB txs.
+func (f *FeeConfig) applyDefaults() {
+	if f.Denom == "" {
+		f.Denom = DefaultFeeDenom
+	}
+	if f.Amount == "" {
+		f.Amount = DefaultFeeAmount
+	}
+	if f.GasLimit == 0 {
+		f.GasLimit = DefaultFeeGasLimit
+	}
+}
+
+// validate runs after applyDefaults: denom must be non-empty and amount must
+// parse as a non-negative integer (a zero amount is allowed for a hypothetical
+// fee-free chain).
+func (f *FeeConfig) validate() error {
+	if f.Denom == "" {
+		return fmt.Errorf("fee.denom is required")
+	}
+	amt, ok := math.NewIntFromString(f.Amount)
+	if !ok {
+		return fmt.Errorf("fee.amount %q is not a valid integer", f.Amount)
+	}
+	if amt.IsNegative() {
+		return fmt.Errorf("fee.amount %q must be non-negative", f.Amount)
 	}
 	return nil
 }

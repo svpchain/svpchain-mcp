@@ -55,6 +55,39 @@ func TestLoadConfig_DefaultsBroadcastMode(t *testing.T) {
 	require.Equal(t, "server", cfg.BroadcastMode, "should default to server-broadcast")
 }
 
+func TestLoadConfig_FeeDefaults(t *testing.T) {
+	// validConfigTOML has no [fee] section, so the defaults must fill in.
+	cfg, err := LoadConfig(writeTempConfig(t, validConfigTOML))
+	require.NoError(t, err)
+	require.Equal(t, DefaultFeeDenom, cfg.Fee.Denom)
+	require.Equal(t, DefaultFeeAmount, cfg.Fee.Amount)
+	require.Equal(t, DefaultFeeGasLimit, cfg.Fee.GasLimit)
+}
+
+func TestLoadConfig_FeeOverride(t *testing.T) {
+	body := validConfigTOML + `
+[fee]
+denom     = "erc20/usdc"
+amount    = "25000"
+gas_limit = 2000000
+`
+	cfg, err := LoadConfig(writeTempConfig(t, body))
+	require.NoError(t, err)
+	require.Equal(t, "erc20/usdc", cfg.Fee.Denom)
+	require.Equal(t, "25000", cfg.Fee.Amount)
+	require.EqualValues(t, 2000000, cfg.Fee.GasLimit)
+}
+
+func TestLoadConfig_FeeRejectsBadAmount(t *testing.T) {
+	body := validConfigTOML + `
+[fee]
+amount = "not-a-number"
+`
+	_, err := LoadConfig(writeTempConfig(t, body))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "fee.amount")
+}
+
 func TestLoadConfig_Rejects(t *testing.T) {
 	cases := []struct {
 		name        string

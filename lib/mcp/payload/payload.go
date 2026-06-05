@@ -59,9 +59,10 @@ type TxPayload struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// Fee mirrors cosmos.tx.v1beta1.Fee on the wire. CLOB txs in svpchain pay
-// zero fee (Amount stays empty) and GasLimit is a comfortable constant —
-// see cmd/dex-bench/cosmos_signing.go:42-43 and the plan's open item #6.
+// Fee mirrors cosmos.tx.v1beta1.Fee on the wire. Short-term CLOB txs in
+// svpchain are gas-free, so their Amount stays empty; all other txs carry the
+// configured fee (see builder.Assemble / cmd/mcp-server FeeConfig). GasLimit
+// is a comfortable constant — see cmd/dex-bench/cosmos_signing.go:42-43.
 type Fee struct {
 	GasLimit string `json:"gas_limit"`
 	Amount   []Coin `json:"amount"`
