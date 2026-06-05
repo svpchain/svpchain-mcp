@@ -4,10 +4,9 @@
 // (signer address matches the loaded key, payload version matches the
 // supported one).
 //
-// Two callers share this package today:
+// The production stdio signer MCP server now lives in its own repo
+// (svpchain-signer-mcp); this package remains in-tree for one caller:
 //
-//   - cmd/mcp-signer/ — production stdio MCP server, exposes
-//     sign_transaction + whoami over the wire.
 //   - scripts/devsign/ — thin one-shot CLI kept for fullflow e2e parity
 //     and ad-hoc dev use; reads a TxPayload JSON file, writes a SignedTx
 //     JSON file.

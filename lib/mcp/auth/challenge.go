@@ -8,8 +8,8 @@ import (
 )
 
 // ChallengePrefix locks the challenge format to the svpchain self-service-
-// auth flow. Mirrored verbatim in cmd/mcp-signer/handlers.go's prefix
-// guard — the two MUST stay in sync.
+// auth flow. Mirrored verbatim in the signer's prefix guard (now the
+// independent svpchain-signer-mcp repo) — the two MUST stay in sync.
 const ChallengePrefix = "svpchain-mcp-auth-v1:"
 
 // BuildChallenge formats a challenge text from its three fields:
