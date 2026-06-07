@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 
@@ -13,6 +14,10 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/tx/signing"
 	"github.com/cosmos/evm/crypto/ethsecp256k1"
 	"github.com/cosmos/gogoproto/proto"
+	ethcommon "github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	ethtypes "github.com/ethereum/go-ethereum/core/types"
+	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 
 	appconfig "github.com/dydxprotocol/v4-chain/protocol/app/config"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
@@ -138,4 +143,89 @@ func Sign(priv *ethsecp256k1.PrivKey, p *payload.TxPayload) (*payload.SignedTx, 
 		SignatureB64:  base64.StdEncoding.EncodeToString(sig),
 		PubKeyB64:     base64.StdEncoding.EncodeToString(pub.Bytes()),
 	}, nil
+}
+
+// SignEVM turns an EVMTxPayload into a signed, RLP-encoded EIP-1559 Ethereum
+// transaction (EVMSignedTx). It is the EVM analog of Sign: the production
+// signer MCP (svpchain-signer-mcp) exposes this as the sign_evm_tx tool; this
+// in-tree copy backs scripts/devsign and the e2e/unit tests so the full
+// build→sign→broadcast flow runs without the external signer.
+//
+// Unlike the Cosmos path, an Ethereum tx is self-contained — there is no
+// AuthInfo/pubkey to attach; the same eth_secp256k1 key (re-derived as an
+// ECDSA key over the same secp256k1 curve) signs the RLP payload directly.
+//
+// Cross-check: the key's 0x address must equal p.SignerAddress (when set), so
+// the signer can't be tricked into signing a tx for another account.
+func SignEVM(priv *ethsecp256k1.PrivKey, p *payload.EVMTxPayload) (*payload.EVMSignedTx, error) {
+	if p.Version != payload.CurrentVersion {
+		return nil, fmt.Errorf("unsupported EVMTxPayload version %d (want %d)", p.Version, payload.CurrentVersion)
+	}
+
+	ecdsaKey, err := ethcrypto.ToECDSA(priv.Key)
+	if err != nil {
+		return nil, fmt.Errorf("convert key to ECDSA: %w", err)
+	}
+	from := ethcrypto.PubkeyToAddress(ecdsaKey.PublicKey)
+	if p.SignerAddress != "" && from != ethcommon.HexToAddress(p.SignerAddress) {
+		return nil, fmt.Errorf("key-derived address %s does not match payload.signer_address %s",
+			from.Hex(), p.SignerAddress)
+	}
+
+	chainID, ok := new(big.Int).SetString(p.EVMChainID, 10)
+	if !ok {
+		return nil, fmt.Errorf("parse evm_chain_id %q", p.EVMChainID)
+	}
+	nonce, err := strconv.ParseUint(p.Nonce, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse nonce %q: %w", p.Nonce, err)
+	}
+	gasLimit, err := strconv.ParseUint(p.Gas, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse gas %q: %w", p.Gas, err)
+	}
+	maxFee, ok := new(big.Int).SetString(p.MaxFeePerGas, 10)
+	if !ok {
+		return nil, fmt.Errorf("parse max_fee_per_gas %q", p.MaxFeePerGas)
+	}
+	tip, ok := new(big.Int).SetString(p.MaxPriorityFeePerGas, 10)
+	if !ok {
+		return nil, fmt.Errorf("parse max_priority_fee_per_gas %q", p.MaxPriorityFeePerGas)
+	}
+	value := new(big.Int) // empty value == 0
+	if p.Value != "" {
+		v, ok := new(big.Int).SetString(p.Value, 10)
+		if !ok {
+			return nil, fmt.Errorf("parse value %q", p.Value)
+		}
+		value = v
+	}
+	var data []byte
+	if p.Data != "" {
+		data, err = hexutil.Decode(p.Data)
+		if err != nil {
+			return nil, fmt.Errorf("decode data: %w", err)
+		}
+	}
+	to := ethcommon.HexToAddress(p.To)
+
+	tx := ethtypes.NewTx(&ethtypes.DynamicFeeTx{
+		ChainID:   chainID,
+		Nonce:     nonce,
+		GasTipCap: tip,
+		GasFeeCap: maxFee,
+		Gas:       gasLimit,
+		To:        &to,
+		Value:     value,
+		Data:      data,
+	})
+	signed, err := ethtypes.SignTx(tx, ethtypes.LatestSignerForChainID(chainID), ecdsaKey)
+	if err != nil {
+		return nil, fmt.Errorf("sign evm tx: %w", err)
+	}
+	raw, err := signed.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("marshal signed evm tx: %w", err)
+	}
+	return &payload.EVMSignedTx{RawTxHex: hexutil.Encode(raw)}, nil
 }

@@ -21,6 +21,16 @@ type Config struct {
 	IndexerBaseURL string `toml:"indexer_base_url"`
 	ListenAddr     string `toml:"listen_addr"`
 
+	// EVMRPCURL is the chain's EVM JSON-RPC endpoint (e.g.
+	// "http://127.0.0.1:8545"). Optional: when empty the EVM tool family
+	// (build_faucet_claim / broadcast_evm_tx / evm_tx_status) refuses, and
+	// non-EVM deployments keep booting unchanged.
+	EVMRPCURL string `toml:"evm_rpc_url"`
+
+	// EVM carries per-contract addresses for the EVM tools. Addresses are
+	// deployment-specific (the ABIs are vendored in lib/mcp/builder/abis).
+	EVM EVMConfig `toml:"evm"`
+
 	// BroadcastMode is informational for whoami. The server always
 	// broadcasts the signed tx the client returns; "local" mode (where
 	// the client broadcasts directly) is documented for a future version.
@@ -29,6 +39,17 @@ type Config struct {
 	Cache  CacheConfig  `toml:"cache"`
 	Limits LimitsConfig `toml:"limits"`
 	Fee    FeeConfig    `toml:"fee"`
+}
+
+// EVMConfig groups per-contract EVM settings. One sub-section per contract
+// (e.g. [evm.faucet]); adding a contract adds a field here.
+type EVMConfig struct {
+	Faucet EVMContractConfig `toml:"faucet"`
+}
+
+// EVMContractConfig is a single contract's deployment-specific address.
+type EVMContractConfig struct {
+	Address string `toml:"address"` // 0x contract address
 }
 
 // FeeConfig sets the gas fee stamped onto non-CLOB txs (deposit / withdraw /

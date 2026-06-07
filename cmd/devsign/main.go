@@ -30,6 +30,7 @@ func run() error {
 	outPath := flag.String("out", "", "path to write SignedTx JSON (default: stdout)")
 	keyHex := flag.String("key-hex", "", "32-byte hex private key (no 0x prefix required; also reads DEVSIGN_KEY_HEX env)")
 	signChallenge := flag.String("sign-challenge", "", "if set, sign this text as a self-service-auth challenge and emit base64 signature to stdout (TxPayload mode is skipped)")
+	evmMode := flag.Bool("evm", false, "sign an EVMTxPayload (emit EVMSignedTx) instead of a Cosmos TxPayload — the sign_evm_tx path")
 	flag.Parse()
 
 	if *keyHex == "" {
@@ -61,6 +62,21 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("read input: %w", err)
 	}
+
+	// --evm mode: decode an EVMTxPayload and emit an EVMSignedTx (the
+	// sign_evm_tx path). Mirrors the Cosmos TxPayload path below.
+	if *evmMode {
+		var ep payload.EVMTxPayload
+		if err := json.Unmarshal(pInput, &ep); err != nil {
+			return fmt.Errorf("decode EVMTxPayload: %w", err)
+		}
+		signed, err := signer.SignEVM(priv, &ep)
+		if err != nil {
+			return err
+		}
+		return writeOutput(*outPath, signed)
+	}
+
 	var p payload.TxPayload
 	if err := json.Unmarshal(pInput, &p); err != nil {
 		return fmt.Errorf("decode TxPayload: %w", err)
@@ -70,16 +86,20 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	return writeOutput(*outPath, signed)
+}
 
-	out, err := json.MarshalIndent(signed, "", "  ")
+// writeOutput marshals v as indented JSON to outPath (stdout when empty/"-").
+func writeOutput(outPath string, v any) error {
+	out, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal SignedTx: %w", err)
+		return fmt.Errorf("marshal output: %w", err)
 	}
-	if *outPath == "" || *outPath == "-" {
+	if outPath == "" || outPath == "-" {
 		_, err = os.Stdout.Write(append(out, '\n'))
 		return err
 	}
-	return os.WriteFile(*outPath, append(out, '\n'), 0o600)
+	return os.WriteFile(outPath, append(out, '\n'), 0o600)
 }
 
 func readInput(path string) ([]byte, error) {

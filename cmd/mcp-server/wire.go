@@ -67,6 +67,23 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 	}
 	chainDeps.CometBft = cometClient
 
+	// EVM is optional: only wire the JSON-RPC client + assembler when an
+	// evm_rpc_url is configured. Without it, EVM tools refuse at call time
+	// (Deps.EVM.Assembler stays nil) and non-EVM deployments are unaffected.
+	var evmDeps tools.EVMDeps
+	if cfg.EVMRPCURL != "" {
+		evmClient, err := chain.NewEVMClient(ctx, cfg.EVMRPCURL)
+		if err != nil {
+			grpcConn.Close()
+			return nil, fmt.Errorf("evm client: %w", err)
+		}
+		chainDeps.EVM = evmClient
+		evmDeps = tools.EVMDeps{
+			Assembler:     builder.NewEVMAssembler(evmClient),
+			FaucetAddress: cfg.EVM.Faucet.Address,
+		}
+	}
+
 	// Indexer + markets cache.
 	idx := indexer.NewClient(cfg.IndexerBaseURL, indexer.Options{})
 	mkts := markets.NewCache(idx, chainDeps.ClobQuery, time.Duration(cfg.Cache.MarketsRefresh), logger)
@@ -107,6 +124,7 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 		Indexer:           idx,
 		Markets:           mkts,
 		Builder:           builder.NewAssembler(cfg.ChainID, cfg.Fee.Denom, cfg.Fee.Amount, cfg.Fee.GasLimit),
+		EVM:               evmDeps,
 		Policy:            policyEngine,
 		Auditor:           policy.NewStdoutAuditor(),
 		Idempotency:       policy.NewIdempotency(0),

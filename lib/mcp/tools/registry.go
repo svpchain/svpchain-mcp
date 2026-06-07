@@ -197,4 +197,31 @@ func Register(srv *mcp.Server, h *Handlers) {
 		Name:        "auth_verify",
 		Description: "Verify a signature over a previously-issued challenge nonce; if it recovers to the same address the nonce was issued for, mint a bearer token bound to that owner. Use the returned bearer_token in the Authorization header for every subsequent request until expires_at.",
 	}, h.AuthVerify)
+
+	// G. EVM. The EVM write flow mirrors the Cosmos one but over JSON-RPC:
+	// build_<contract>_<action> → sign_evm_transaction (local signer) →
+	// broadcast_evm_tx (this server) → evm_tx_status. broadcast_evm_tx and
+	// evm_tx_status are contract-agnostic; per-contract build_* tools sit above.
+	registerEVMTools(srv, h)
+}
+
+// registerEVMTools registers the EVM tool family. Adding a new EVM contract
+// adds its build_* tool here next to build_faucet_claim — no other registry
+// changes.
+func registerEVMTools(srv *mcp.Server, h *Handlers) {
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "broadcast_evm_tx",
+		Description: "Broadcast an EVM transaction signed locally by sign_evm_transaction on the svpchain signer MCP — the SignedEvmTx returned for an EVMTxPayload from an EVM build_* tool. Verifies the recovered sender matches the tenant owner before submitting via eth_sendRawTransaction.",
+	}, h.BroadcastEVMTx)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "evm_tx_status",
+		Description: "Poll the EVM JSON-RPC for the receipt of a previously broadcast EVM tx by hash. Returns status pending (not yet included), success, or failed.",
+	}, h.EVMTxStatus)
+
+	// Per-contract build_* tools.
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_faucet_claim",
+		Description: "Construct (but do not sign) a faucet claim transaction. Returns an EVMTxPayload — pass to sign_evm_transaction (svpchain signer MCP) then broadcast_evm_tx to land on chain.",
+	}, h.BuildFaucetClaim)
 }

@@ -27,11 +27,11 @@ type TxPayload struct {
 	// on-chain — see protocol/x/clob/types/order_id.go:24.
 	ClientID string `json:"client_id"`
 
-	ChainID        string `json:"chain_id"`
-	SignerAddress  string `json:"signer_address"`
-	AccountNumber  string `json:"account_number"`
-	Sequence       string `json:"sequence"`
-	IsShortTermCLOB bool  `json:"is_short_term_clob"`
+	ChainID         string `json:"chain_id"`
+	SignerAddress   string `json:"signer_address"`
+	AccountNumber   string `json:"account_number"`
+	Sequence        string `json:"sequence"`
+	IsShortTermCLOB bool   `json:"is_short_term_clob"`
 
 	// Encoded transaction parts. Standard-base64 strings — the field-name
 	// suffix _b64 makes the wire shape explicit. We use `string` rather
@@ -128,4 +128,80 @@ type BroadcastResult struct {
 	TxHash string `json:"tx_hash"` // hex
 	Code   uint32 `json:"code"`
 	RawLog string `json:"raw_log,omitempty"`
+}
+
+// EVMTxType discriminates the Ethereum tx formats the signer supports. Mirrors
+// the signer's constants; the remote always builds EIP-1559.
+const (
+	EVMTxTypeEIP1559 = "eip1559"
+	EVMTxTypeLegacy  = "legacy"
+)
+
+// EVMTxPayload is the on-wire envelope returned by every EVM build_* tool
+// (e.g. build_faucet_claim). It is the Ethereum-tx analog of TxPayload: the
+// remote MCP server fills every field from chain state + the per-contract
+// calldata, the local signer (svpchain-signer-mcp's sign_evm_transaction tool)
+// turns it into a signed EIP-1559 transaction, and broadcast_evm_tx submits
+// the raw bytes via eth_sendRawTransaction.
+//
+// The JSON shape MUST stay byte-compatible with the signer's payload.EvmTxPayload
+// (svpchain-signer-mcp/internal/payload/evm.go) — the two repos agree only by
+// these JSON tags. Notably the signer keys on `evm_chain_id`, `gas`, and `data`
+// (NOT chain_id / gas_limit / data_hex), and infers EIP-1559 from tx_type /
+// the presence of max_fee_per_gas. ClientID and ExpiresAt are remote-only
+// bookkeeping the signer ignores (unknown JSON fields are dropped on decode).
+//
+// Unlike a Cosmos tx, an Ethereum tx is self-contained — the signer adds no
+// AuthInfo/pubkey, it just RLP-signs these fields after cross-checking that the
+// key's 0x address equals SignerAddress and evm_chain_id matches its binding.
+//
+// Numeric fields are decimal strings (nonce/gas) or decimal-wei strings
+// (fees/value) so JS-based MCP clients don't lose precision on big values.
+type EVMTxPayload struct {
+	Version int `json:"version"`
+
+	// ClientID is the broadcast-idempotency key (uuid); remote-only — the
+	// signer ignores it. The agent echoes it into broadcast_evm_tx.client_id.
+	ClientID string `json:"client_id"`
+
+	// EVMChainID is the numeric EIP-155 chain id as a string (svpchain:
+	// "262144"). The signer refuses unless it matches its configured chain.
+	EVMChainID string `json:"evm_chain_id"`
+
+	// SignerAddress is the 0x sender the signer must match (hex-checksummed).
+	SignerAddress string `json:"signer_address"`
+
+	// TxType selects the tx format for the signer ("eip1559" | "legacy"). The
+	// remote always builds EIP-1559.
+	TxType string `json:"tx_type,omitempty"`
+
+	To                   string `json:"to,omitempty"`             // 0x contract address (empty == create)
+	Nonce                string `json:"nonce"`                    // decimal uint64
+	Gas                  string `json:"gas"`                      // gas limit, decimal uint64
+	MaxFeePerGas         string `json:"max_fee_per_gas"`          // decimal wei
+	MaxPriorityFeePerGas string `json:"max_priority_fee_per_gas"` // decimal wei
+	Value                string `json:"value,omitempty"`          // decimal wei (empty == 0)
+	Data                 string `json:"data,omitempty"`           // 0x-prefixed calldata
+
+	// ExpiresAt is remote-only TTL bookkeeping; the signer ignores it.
+	ExpiresAt time.Time `json:"expires_at"`
+
+	Summary EVMSummary `json:"summary"`
+}
+
+// EVMSummary is the human-readable description of an EVM build_* result.
+// Informational only. Mirrors the signer's payload.EvmSummary shape
+// (tool_name + description) so it round-trips cleanly.
+type EVMSummary struct {
+	ToolName    string `json:"tool_name"`
+	Description string `json:"description,omitempty"`
+}
+
+// EVMSignedTx is what broadcast_evm_tx receives from the MCP client — the
+// output of the signer's sign_evm_transaction tool (payload.SignedEvmTx). Only
+// RawTxHex is needed to broadcast; the signer also returns tx_hash/v/r/s, which
+// are accepted and ignored here.
+type EVMSignedTx struct {
+	RawTxHex string `json:"raw_tx_hex"` // 0x-prefixed RLP-encoded signed tx
+	TxHash   string `json:"tx_hash,omitempty"`
 }

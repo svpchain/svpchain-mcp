@@ -21,6 +21,22 @@ type ChainDeps struct {
 	SubaccountQuery chain.SubaccountQueryClient
 	PricesQuery     chain.PricesQueryClient
 	CometBft        chain.CometBftClient
+
+	// EVM is the EVM JSON-RPC client backing the EVM tool family
+	// (build_faucet_claim, broadcast_evm_tx, evm_tx_status). Nil when the
+	// server is configured without evm_rpc_url; EVM tools refuse in that case.
+	EVM chain.EVMClient
+}
+
+// EVMDeps groups the EVM build-path dependencies: the contract-agnostic
+// assembler plus the deployment-specific contract addresses (sourced from
+// config). Adding a new EVM contract adds a field here for its address.
+type EVMDeps struct {
+	Assembler *builder.EVMAssembler
+
+	// FaucetAddress is the 0x address of the faucet contract; empty when the
+	// faucet is not configured.
+	FaucetAddress string
 }
 
 // Deps is the full dependency bundle every tool handler receives. v0.1
@@ -31,6 +47,11 @@ type Deps struct {
 	Indexer *indexer.Client
 	Markets *markets.Cache
 	Builder *builder.Assembler
+
+	// EVM holds the EVM build dependencies (assembler + per-contract
+	// addresses). Zero-valued when the server runs without evm_rpc_url; EVM
+	// tools check EVM.Assembler != nil and refuse otherwise.
+	EVM EVMDeps
 
 	Policy      *policy.Engine
 	Auditor     *policy.Auditor
@@ -48,10 +69,10 @@ type Deps struct {
 	// populated by auth_challenge / auth_verify; IPChallengeLimit caps
 	// auth_challenge per-IP since the tool runs before any tenant
 	// context is established.
-	NonceStore        *auth.NonceStore
-	DynamicTenants    *auth.DynamicTenantStore
-	IPChallengeLimit  *auth.IPRateLimiter
-	SessionBearers    *auth.SessionBearers
+	NonceStore       *auth.NonceStore
+	DynamicTenants   *auth.DynamicTenantStore
+	IPChallengeLimit *auth.IPRateLimiter
+	SessionBearers   *auth.SessionBearers
 
 	Logger log.Logger
 
