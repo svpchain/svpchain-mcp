@@ -38,8 +38,10 @@
 #                                  to disable EVM (omits the [evm] block).
 #                                  SVPCHAIN_EVM_RPC
 #   --faucet-address <0x…>         Faucet contract address. SVPCHAIN_FAUCET_ADDRESS
-#                                  Omit to leave [evm.faucet] unset (the
-#                                  build_faucet_claim tool then refuses).
+#                                  Defaults to "". When EVM is on, [evm.faucet]
+#                                  is always rendered with this value, so the
+#                                  default config carries an empty placeholder
+#                                  (build_faucet_claim refuses until it is set).
 #   --install-dir <path>           Default ~/svpchain-mcp on remote (a
 #                                  leading ~ expands to the ssh user's $HOME).
 #   --image-tag <tag>              Default <git-short-sha>.
@@ -164,9 +166,11 @@ EOF
 [cache]
 markets_refresh = "${markets_refresh}"
 EOF
-  # [evm.faucet] is a table — emit it after [cache] (table order is free).
-  # Only when EVM is enabled AND a faucet address was supplied.
-  if [[ -n "$evm_rpc" && -n "$faucet_address" ]]; then
+  # [evm.faucet] is a table — emit it after [cache] (table order is free)
+  # whenever EVM is enabled. address defaults to "" — a placeholder the
+  # operator fills with the deployed faucet (build_faucet_claim refuses
+  # until it is a real 0x address).
+  if [[ -n "$evm_rpc" ]]; then
     echo ""
     echo "[evm.faucet]"
     echo "address = \"${faucet_address}\""
