@@ -59,6 +59,7 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 		ClobQuery:       chain.NewClobQueryClient(grpcConn),
 		SubaccountQuery: chain.NewSubaccountQueryClient(grpcConn),
 		PricesQuery:     chain.NewPricesQueryClient(grpcConn),
+		BankQuery:       chain.NewBankQueryClient(grpcConn),
 	}
 	cometClient, err := chain.NewCometBftClient(cfg.CometRPCURL)
 	if err != nil {

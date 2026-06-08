@@ -20,6 +20,7 @@ type ChainDeps struct {
 	ClobQuery       chain.ClobQueryClient
 	SubaccountQuery chain.SubaccountQueryClient
 	PricesQuery     chain.PricesQueryClient
+	BankQuery       chain.BankQueryClient
 	CometBft        chain.CometBftClient
 
 	// EVM is the EVM JSON-RPC client backing the EVM tool family

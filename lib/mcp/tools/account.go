@@ -2,11 +2,15 @@ package tools
 
 import (
 	"context"
+	"strings"
 
+	"cosmossdk.io/math"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	satypes "github.com/dydxprotocol/v4-chain/protocol/x/subaccounts/types"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
+	assettypes "github.com/dydxprotocol/v4-chain/protocol/x/assets/types"
+	satypes "github.com/dydxprotocol/v4-chain/protocol/x/subaccounts/types"
 )
 
 // -- get_subaccount (indexer) -------------------------------------------
@@ -134,6 +138,88 @@ func (h *Handlers) GetLiveSubaccount(
 		return nil, GetLiveSubaccountOutput{}, err
 	}
 	return nil, GetLiveSubaccountOutput{Subaccount: liveSubaccountFromChain(sub)}, nil
+}
+
+// -- get_balance (chain x/bank) -----------------------------------------
+
+type GetBalanceInput struct {
+	Owner string `json:"owner" jsonschema:"svp1... bech32 owner address whose wallet (bank) balance to read"`
+}
+
+// BalanceDTO is one denom's wallet balance. Amount is the authoritative raw
+// on-chain integer in the denom's base units; Symbol/Display are a best-effort
+// human projection for denoms whose decimals we know (USDC, native SVP) and are
+// omitted for any other denom.
+type BalanceDTO struct {
+	Denom   string `json:"denom"`
+	Amount  string `json:"amount"`            // base-unit integer (e.g. quantums)
+	Symbol  string `json:"symbol,omitempty"`  // human ticker for known denoms
+	Display string `json:"display,omitempty"` // decimal-adjusted amount for known denoms
+}
+
+type GetBalanceOutput struct {
+	Owner    string       `json:"owner"`
+	Balances []BalanceDTO `json:"balances"`
+}
+
+// knownDenoms maps base denoms to a human ticker + decimal places so
+// get_balance can present a decimal-adjusted amount next to the raw integer.
+// Unknown denoms are still returned, just without Symbol/Display.
+var knownDenoms = map[string]struct {
+	Symbol   string
+	Decimals int64
+}{
+	assettypes.UusdcDenom: {Symbol: "USDC", Decimals: 6}, // erc20/usdc
+	"asvp":                {Symbol: "SVP", Decimals: 18}, // native gas token (atto-SVP)
+}
+
+// GetBalance reads an owner's x/bank wallet balances across all denoms. This is
+// the funds the deposit/withdraw tools move into and out of subaccount trading
+// collateral — distinct from get_subaccount / get_live_subaccount, which read
+// the collateral itself.
+func (h *Handlers) GetBalance(
+	ctx context.Context,
+	_ *mcp.CallToolRequest,
+	in GetBalanceInput,
+) (*mcp.CallToolResult, GetBalanceOutput, error) {
+	tp, err := h.authorizeOwner(ctx, "get_balance", in.Owner)
+	if err != nil {
+		return nil, GetBalanceOutput{}, err
+	}
+	coins, err := h.Deps.Chain.BankQuery.AllBalances(ctx, in.Owner)
+	if err != nil {
+		return nil, GetBalanceOutput{}, err
+	}
+	return nil, GetBalanceOutput{Owner: tp.Owner, Balances: balancesFromCoins(coins)}, nil
+}
+
+// balancesFromCoins projects raw bank coins into JSON-friendly BalanceDTOs,
+// attaching Symbol/Display for known denoms. Pure and node-free so it's
+// trivially testable. Returns a non-nil slice so empty wallets marshal to
+// `[]` rather than `null`.
+func balancesFromCoins(coins sdk.Coins) []BalanceDTO {
+	balances := make([]BalanceDTO, 0, len(coins))
+	for _, c := range coins {
+		dto := BalanceDTO{Denom: c.Denom, Amount: c.Amount.String()}
+		if meta, ok := knownDenoms[c.Denom]; ok {
+			dto.Symbol = meta.Symbol
+			dto.Display = humanAmount(c.Amount, meta.Decimals)
+		}
+		balances = append(balances, dto)
+	}
+	return balances
+}
+
+// humanAmount renders a base-unit integer as a decimal-adjusted string with
+// trailing zeros trimmed (LegacyDec.String always pads to 18 places, which
+// reads badly): 100_000_000 USDC at 6 dp -> "100", 100_500_000 -> "100.5".
+func humanAmount(amount math.Int, decimals int64) string {
+	s := math.LegacyNewDecFromIntWithPrec(amount, decimals).String()
+	if strings.ContainsRune(s, '.') {
+		s = strings.TrimRight(s, "0")
+		s = strings.TrimRight(s, ".")
+	}
+	return s
 }
 
 // -- whoami -------------------------------------------------------------

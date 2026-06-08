@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"testing"
 
+	"cosmossdk.io/math"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dydxprotocol/v4-chain/protocol/dtypes"
+	assettypes "github.com/dydxprotocol/v4-chain/protocol/x/assets/types"
 	satypes "github.com/dydxprotocol/v4-chain/protocol/x/subaccounts/types"
 )
 
@@ -59,6 +62,49 @@ func TestLiveSubaccountFromChain_JSONShape(t *testing.T) {
 	require.IsType(t, "", pp["funding_index"])
 	require.IsType(t, "", pp["quote_balance"])
 	require.Equal(t, "-500", pp["quantums"])
+}
+
+// TestBalancesFromCoins_KnownAndUnknownDenoms proves the bank-coin projection:
+// known denoms (USDC, native SVP) get a ticker + decimal-adjusted Display, the
+// raw base-unit Amount is always preserved, and an unknown denom passes through
+// with no Symbol/Display rather than being dropped.
+func TestBalancesFromCoins_KnownAndUnknownDenoms(t *testing.T) {
+	coins := sdk.NewCoins(
+		sdk.NewCoin(assettypes.UusdcDenom, math.NewInt(100_500_000)), // 100.5 USDC at 6 dp
+		sdk.NewCoin("asvp", math.NewIntWithDecimal(5, 18)),           // 5 SVP at 18 dp
+		sdk.NewCoin("ibc/SOMETHINGUNKNOWN", math.NewInt(42)),
+	)
+
+	got := balancesFromCoins(coins)
+	byDenom := map[string]BalanceDTO{}
+	for _, b := range got {
+		byDenom[b.Denom] = b
+	}
+
+	// Raw base-unit amount preserved; Display is decimal-adjusted with
+	// trailing zeros trimmed (so 100.5, not 100.500000000000000000).
+	usdc := byDenom[assettypes.UusdcDenom]
+	require.Equal(t, "100500000", usdc.Amount)
+	require.Equal(t, "USDC", usdc.Symbol)
+	require.Equal(t, "100.5", usdc.Display)
+
+	svp := byDenom["asvp"]
+	require.Equal(t, "5000000000000000000", svp.Amount)
+	require.Equal(t, "SVP", svp.Symbol)
+	require.Equal(t, "5", svp.Display)
+
+	unknown := byDenom["ibc/SOMETHINGUNKNOWN"]
+	require.Equal(t, "42", unknown.Amount)
+	require.Empty(t, unknown.Symbol)
+	require.Empty(t, unknown.Display)
+}
+
+// TestBalancesFromCoins_EmptyIsEmptySlice ensures an empty wallet marshals to
+// [] rather than null (clients that reject null arrays).
+func TestBalancesFromCoins_EmptyIsEmptySlice(t *testing.T) {
+	b, err := json.Marshal(GetBalanceOutput{Owner: "svp1empty", Balances: balancesFromCoins(sdk.NewCoins())})
+	require.NoError(t, err)
+	require.Contains(t, string(b), `"balances":[]`)
 }
 
 func TestLiveSubaccountFromChain_EmptyPositions(t *testing.T) {

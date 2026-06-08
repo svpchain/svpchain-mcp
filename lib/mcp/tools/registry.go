@@ -85,6 +85,11 @@ func Register(srv *mcp.Server, h *Handlers) {
 	}, h.GetLiveSubaccount)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_balance",
+		Description: "Fetch an owner's wallet (x/bank) balances across all denoms — the USDC the deposit/withdraw tools move into and out of subaccount collateral. Distinct from get_subaccount, which reads trading collateral.",
+	}, h.GetBalance)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "whoami",
 		Description: "Return the calling tenant's identity, allowed subaccounts, broadcast mode, and kill-switch state.",
 	}, h.Whoami)
