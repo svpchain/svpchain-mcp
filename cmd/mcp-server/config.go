@@ -6,6 +6,7 @@ import (
 
 	"cosmossdk.io/math"
 	"github.com/BurntSushi/toml"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // Config is the full server configuration loaded from a TOML file.
@@ -26,6 +27,17 @@ type Config struct {
 	// (broadcast_evm_tx / evm_tx_status) refuses, and non-EVM deployments
 	// keep booting unchanged.
 	EVMRPCURL string `toml:"evm_rpc_url"`
+
+	// EVMUniswapRouterAddr / EVMWSVPAddr bind the swap tools (quote_swap /
+	// build_token_approval / build_swap) to a UniswapV2Router02 deployment and
+	// its wrapped-native (WSVP) token. The router key names its protocol since
+	// it is protocol-specific (a future V3 / aggregator router would be a
+	// distinct key); WSVP stays generic because wrapped-native is shared infra.
+	// Both are optional and must be set together; setting either also requires
+	// evm_rpc_url. When unset the swap tools refuse, and the rest of the EVM
+	// family is unaffected.
+	EVMUniswapRouterAddr string `toml:"evm_uniswap_router_addr"`
+	EVMWSVPAddr          string `toml:"evm_wsvp_addr"`
 
 	// FaucetBaseURL is the faucet backend's HTTP base URL (e.g.
 	// "https://pre-faucet.svpchain.org"). Optional: when empty the faucet
@@ -129,6 +141,31 @@ func (c *Config) Validate() error {
 	}
 	if err := c.Fee.validate(); err != nil {
 		return err
+	}
+	if err := c.validateSwap(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateSwap enforces the swap-address invariants: router + WSVP are
+// both-or-neither, must be valid 0x addresses when set, and require an EVM RPC
+// endpoint (the swap tools need eth_call + eth_sendRawTransaction).
+func (c *Config) validateSwap() error {
+	if c.EVMUniswapRouterAddr == "" && c.EVMWSVPAddr == "" {
+		return nil
+	}
+	if c.EVMUniswapRouterAddr == "" || c.EVMWSVPAddr == "" {
+		return fmt.Errorf("evm_uniswap_router_addr and evm_wsvp_addr must be set together")
+	}
+	if !common.IsHexAddress(c.EVMUniswapRouterAddr) {
+		return fmt.Errorf("evm_uniswap_router_addr %q is not a valid 0x address", c.EVMUniswapRouterAddr)
+	}
+	if !common.IsHexAddress(c.EVMWSVPAddr) {
+		return fmt.Errorf("evm_wsvp_addr %q is not a valid 0x address", c.EVMWSVPAddr)
+	}
+	if c.EVMRPCURL == "" {
+		return fmt.Errorf("evm_rpc_url is required when evm_uniswap_router_addr / evm_wsvp_addr are set")
 	}
 	return nil
 }

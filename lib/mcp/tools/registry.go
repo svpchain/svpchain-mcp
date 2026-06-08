@@ -86,7 +86,7 @@ func Register(srv *mcp.Server, h *Handlers) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "get_balance",
-		Description: "Fetch an owner's wallet (x/bank) balances across all denoms — the USDC the deposit/withdraw tools move into and out of subaccount collateral. Distinct from get_subaccount, which reads trading collateral.",
+		Description: "Fetch an owner's wallet balances: every x/bank denom (the USDC the deposit/withdraw tools move into and out of subaccount collateral) plus known pure-ERC-20 tokens (e.g. USDV) read directly from their contracts. ERC-20 entries carry source=\"erc20\" and are NOT bank-transferable. Distinct from get_subaccount, which reads trading collateral.",
 	}, h.GetBalance)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -241,4 +241,22 @@ func registerEVMTools(srv *mcp.Server, h *Handlers) {
 		Name:        "evm_tx_status",
 		Description: "Poll the EVM JSON-RPC for the receipt of a previously broadcast EVM tx by hash. Returns status pending (not yet included), success, or failed.",
 	}, h.EVMTxStatus)
+
+	// UniswapV2 swaps (the first per-contract EVM build_* family). Tokens are
+	// 0x ERC-20 addresses, or empty/"native"/"svp" for the native SVP coin;
+	// amounts are human units; output goes to the caller's own address.
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "quote_swap",
+		Description: "Quote a UniswapV2 swap: the output token_in -> token_out would yield at current reserves (before slippage), for amount_in human units. Read-only (eth_call) — no signing. Use to preview/size a swap; build_swap re-quotes at build time.",
+	}, h.QuoteSwap)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_token_approval",
+		Description: "Construct an ERC-20 approve so the swap router can spend your input token — the prerequisite for any token-input swap (native-SVP-input swaps skip this). Pass unlimited=true to approve once for all future swaps of this token, or amount for an exact human amount. Returns an EVMTxPayload — pass to sign_evm_transaction (local signer) then broadcast_evm_tx.",
+	}, h.BuildTokenApproval)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_swap",
+		Description: "Construct an exact-input UniswapV2 swap of amount_in (human units) token_in -> token_out, output to your own address. Re-quotes and applies slippage_bps (default 50 = 0.5%) to set the on-chain minimum, and for token-input swaps checks the router allowance first (returns an \"approve first\" error pointing at build_token_approval if missing). Use empty/\"native\"/\"svp\" for the native SVP side. Returns an EVMTxPayload — pass to sign_evm_transaction then broadcast_evm_tx.",
+	}, h.BuildSwap)
 }

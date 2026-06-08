@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cosmossdk.io/log"
+	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/dydxprotocol/v4-chain/protocol/app"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
@@ -82,6 +83,20 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 		chainDeps.EVM = evmClient
 		evmDeps = tools.EVMDeps{
 			Assembler: builder.NewEVMAssembler(evmClient),
+		}
+		// Swap tools are wired only when the router + WSVP addresses are also
+		// configured (config validation guarantees both-or-neither + valid
+		// hex). Without them Uniswap stays nil and the swap tools refuse.
+		if cfg.EVMUniswapRouterAddr != "" {
+			uni, err := builder.NewUniswapV2(
+				common.HexToAddress(cfg.EVMUniswapRouterAddr),
+				common.HexToAddress(cfg.EVMWSVPAddr),
+			)
+			if err != nil {
+				grpcConn.Close()
+				return nil, fmt.Errorf("uniswap binding: %w", err)
+			}
+			evmDeps.Uniswap = uni
 		}
 	}
 

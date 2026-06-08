@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"cosmossdk.io/math"
@@ -151,11 +152,18 @@ type GetBalanceInput struct {
 // on-chain integer in the denom's base units; Symbol/Display are a best-effort
 // human projection for denoms whose decimals we know (USDC, native SVP) and are
 // omitted for any other denom.
+//
+// Most balances are x/bank denoms (Source omitted). Pure ERC-20 tokens (e.g.
+// USDV) have no x/bank representation, so they are read directly from the
+// contract via balanceOf and carry Source="erc20" with Denom set to the 0x
+// contract address — a signal they are NOT bank-transferable (build_bank_send
+// won't move them; use build_swap).
 type BalanceDTO struct {
 	Denom   string `json:"denom"`
 	Amount  string `json:"amount"`            // base-unit integer (e.g. quantums)
 	Symbol  string `json:"symbol,omitempty"`  // human ticker for known denoms
 	Display string `json:"display,omitempty"` // decimal-adjusted amount for known denoms
+	Source  string `json:"source,omitempty"`  // "erc20" for contract-read balances; omitted for x/bank
 }
 
 type GetBalanceOutput struct {
@@ -191,7 +199,54 @@ func (h *Handlers) GetBalance(
 	if err != nil {
 		return nil, GetBalanceOutput{}, err
 	}
-	return nil, GetBalanceOutput{Owner: tp.Owner, Balances: balancesFromCoins(coins)}, nil
+	balances := balancesFromCoins(coins)
+	// Pure ERC-20s (USDV, …) aren't in x/bank — read them from their contracts
+	// and merge. Best-effort: a missing/unreachable EVM never fails the bank
+	// balance read.
+	balances = append(balances, h.erc20Balances(ctx, tp.Owner)...)
+	return nil, GetBalanceOutput{Owner: tp.Owner, Balances: balances}, nil
+}
+
+// erc20Balances reads the owner's balance of each known pure-ERC-20 token (see
+// knownSwapTokens) straight from its contract, since they have no x/bank denom.
+// Best-effort by design: returns nil (no error) when EVM/swaps are disabled,
+// and silently skips any token whose balanceOf/decimals read fails or whose
+// balance is zero — get_balance must still return bank balances regardless.
+// Tokens are iterated in symbol order for deterministic output.
+func (h *Handlers) erc20Balances(ctx context.Context, owner string) []BalanceDTO {
+	if h.Deps.Chain.EVM == nil || h.Deps.EVM.Uniswap == nil {
+		return nil
+	}
+	ownerEth, err := ownerEthAddress(owner)
+	if err != nil {
+		return nil
+	}
+	symbols := make([]string, 0, len(knownSwapTokens))
+	for sym := range knownSwapTokens {
+		symbols = append(symbols, sym)
+	}
+	sort.Strings(symbols)
+
+	var out []BalanceDTO
+	for _, sym := range symbols {
+		addr := knownSwapTokens[sym]
+		bal, err := h.erc20Balance(ctx, addr, ownerEth)
+		if err != nil || bal.Sign() <= 0 {
+			continue
+		}
+		dec, err := h.tokenDecimals(ctx, false, addr)
+		if err != nil {
+			continue
+		}
+		out = append(out, BalanceDTO{
+			Denom:   addr.Hex(),
+			Amount:  bal.String(),
+			Symbol:  strings.ToUpper(sym),
+			Display: humanAmount(math.NewIntFromBigInt(bal), dec),
+			Source:  "erc20",
+		})
+	}
+	return out
 }
 
 // balancesFromCoins projects raw bank coins into JSON-friendly BalanceDTOs,

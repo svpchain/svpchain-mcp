@@ -119,6 +119,64 @@ func TestLoadConfig_Rejects(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_SwapAddresses(t *testing.T) {
+	router := "0x1111111111111111111111111111111111111111"
+	wsvp := "0x2222222222222222222222222222222222222222"
+
+	// These are top-level keys, so they must precede the [cache]/[limits]
+	// table headers in validConfigTOML — keys after a table header belong to
+	// that table.
+	withTop := func(extra string) string { return extra + validConfigTOML }
+
+	t.Run("both set with evm_rpc_url", func(t *testing.T) {
+		body := withTop("evm_rpc_url = \"http://127.0.0.1:8545\"\n" +
+			"evm_uniswap_router_addr = \"" + router + "\"\nevm_wsvp_addr = \"" + wsvp + "\"\n")
+		cfg, err := LoadConfig(writeTempConfig(t, body))
+		require.NoError(t, err)
+		require.Equal(t, router, cfg.EVMUniswapRouterAddr)
+		require.Equal(t, wsvp, cfg.EVMWSVPAddr)
+	})
+
+	t.Run("neither set is fine", func(t *testing.T) {
+		_, err := LoadConfig(writeTempConfig(t, validConfigTOML))
+		require.NoError(t, err)
+	})
+
+	cases := []struct {
+		name        string
+		extra       string
+		expectError string
+	}{
+		{
+			"router without wsvp",
+			"evm_rpc_url = \"http://127.0.0.1:8545\"\nevm_uniswap_router_addr = \"" + router + "\"\n",
+			"must be set together",
+		},
+		{
+			"wsvp without router",
+			"evm_rpc_url = \"http://127.0.0.1:8545\"\nevm_wsvp_addr = \"" + wsvp + "\"\n",
+			"must be set together",
+		},
+		{
+			"invalid router address",
+			"evm_rpc_url = \"http://127.0.0.1:8545\"\nevm_uniswap_router_addr = \"0xnope\"\nevm_wsvp_addr = \"" + wsvp + "\"\n",
+			"not a valid 0x address",
+		},
+		{
+			"set without evm_rpc_url",
+			"evm_uniswap_router_addr = \"" + router + "\"\nevm_wsvp_addr = \"" + wsvp + "\"\n",
+			"evm_rpc_url is required",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadConfig(writeTempConfig(t, withTop(tc.extra)))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.expectError)
+		})
+	}
+}
+
 // stripLine removes any line in body that begins (after leading whitespace)
 // with prefix — used by the rejection tests to strip a required field.
 func stripLine(body, prefix string) string {

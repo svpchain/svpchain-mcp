@@ -42,6 +42,16 @@
 #                                  Default https://pre-faucet.svpchain.org. Set
 #                                  "" to disable (omits faucet_base_url; the
 #                                  faucet tools then refuse). SVPCHAIN_FAUCET_URL
+#   --evm-uniswap-router <0xaddr>  UniswapV2 router address, enabling the swap
+#                                  tools (quote_swap, build_token_approval,
+#                                  build_swap). Requires --evm-rpc and
+#                                  --evm-wsvp. Defaults to the known deployment
+#                                  (0xFe7bf2DF…01e4); set "" to disable swaps.
+#                                  SVPCHAIN_EVM_UNISWAP_ROUTER
+#   --evm-wsvp <0xaddr>            Wrapped-native (WSVP) token address; must be
+#                                  set together with --evm-uniswap-router.
+#                                  Defaults to the known deployment
+#                                  (0x771a0a63…6531). SVPCHAIN_EVM_WSVP
 #   --install-dir <path>           Default ~/svpchain-mcp on remote (a
 #                                  leading ~ expands to the ssh user's $HOME).
 #   --image-tag <tag>              Default <git-short-sha>.
@@ -94,6 +104,8 @@ indexer="${SVPCHAIN_INDEXER:-http://127.0.0.1:3002}"
 listen_port="${SVPCHAIN_LISTEN_PORT:-8765}"
 evm_rpc="${SVPCHAIN_EVM_RPC:-http://127.0.0.1:8545}"
 faucet_url="${SVPCHAIN_FAUCET_URL:-https://pre-faucet.svpchain.org}"
+evm_uniswap_router="${SVPCHAIN_EVM_UNISWAP_ROUTER:-0xFe7bf2DFd5CB268C6779f1F614638a436Cb701e4}"
+evm_wsvp="${SVPCHAIN_EVM_WSVP:-0x771a0a63D8198b7dbea4a16910ff68AB38006531}"
 install_dir="~/svpchain-mcp"
 image_tag=""
 platform="linux/amd64"
@@ -116,6 +128,8 @@ while [[ $# -gt 0 ]]; do
     --listen-port)            listen_port="$2";       shift 2 ;;
     --evm-rpc)                evm_rpc="$2";           shift 2 ;;
     --faucet-url)             faucet_url="$2";        shift 2 ;;
+    --evm-uniswap-router)     evm_uniswap_router="$2"; shift 2 ;;
+    --evm-wsvp)               evm_wsvp="$2";          shift 2 ;;
     --install-dir)            install_dir="$2";       shift 2 ;;
     --image-tag)              image_tag="$2";         shift 2 ;;
     --platform)               platform="$2";          shift 2 ;;
@@ -159,10 +173,13 @@ indexer_base_url = "${indexer}"
 listen_addr      = "0.0.0.0:${listen_port}"
 broadcast_mode   = "server"
 EOF
-  # evm_rpc_url and faucet_base_url are top-level keys, so they must precede
-  # any [table] header.
-  [[ -n "$evm_rpc" ]]    && echo "evm_rpc_url      = \"${evm_rpc}\""
-  [[ -n "$faucet_url" ]] && echo "faucet_base_url  = \"${faucet_url}\""
+  # evm_rpc_url, faucet_base_url, and the swap addresses are top-level keys, so
+  # they must precede any [table] header. evm_uniswap_router_addr / evm_wsvp_addr
+  # are both-or-neither and require evm_rpc_url (config.go::validateSwap).
+  [[ -n "$evm_rpc" ]]            && echo "evm_rpc_url             = \"${evm_rpc}\""
+  [[ -n "$faucet_url" ]]         && echo "faucet_base_url         = \"${faucet_url}\""
+  [[ -n "$evm_uniswap_router" ]] && echo "evm_uniswap_router_addr = \"${evm_uniswap_router}\""
+  [[ -n "$evm_wsvp" ]]           && echo "evm_wsvp_addr           = \"${evm_wsvp}\""
   cat <<EOF
 
 [cache]

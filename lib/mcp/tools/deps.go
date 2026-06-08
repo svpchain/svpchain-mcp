@@ -33,9 +33,15 @@ type ChainDeps struct {
 
 // EVMDeps groups the EVM build-path dependencies: the contract-agnostic
 // assembler that fills nonce/gas/fees for per-contract build_* tools. Adding a
-// new EVM contract adds its deployment-specific address here.
+// new EVM contract adds its deployment-specific binding here.
 type EVMDeps struct {
 	Assembler *builder.EVMAssembler
+
+	// Uniswap binds the swap tools (quote_swap / build_token_approval /
+	// build_swap) to a UniswapV2Router02 + WSVP deployment. Nil unless both
+	// evm_uniswap_router_addr and evm_wsvp_addr are configured (which also requires
+	// evm_rpc_url); the swap tools check it and refuse otherwise.
+	Uniswap *builder.UniswapV2
 }
 
 // Deps is the full dependency bundle every tool handler receives. v0.1
