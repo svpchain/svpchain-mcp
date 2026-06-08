@@ -107,6 +107,10 @@ type Summary struct {
 	AmountHuman    string `json:"amount_human,omitempty"`
 	RecipientOwner string `json:"recipient_owner,omitempty"`
 	RecipientNum   uint32 `json:"recipient_subaccount,omitempty"`
+
+	// Denom is the bank denom for a generic bank send (build_bank_send); the
+	// subaccount funds tools use AssetID instead.
+	Denom string `json:"denom,omitempty"`
 }
 
 // SignedTx is what broadcast_signed_tx receives from the MCP client. The

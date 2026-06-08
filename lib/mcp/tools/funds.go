@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"cosmossdk.io/math"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
@@ -120,6 +122,82 @@ func (h *Handlers) BuildWithdrawFromSubaccount(
 		return nil, BuildWithdrawFromSubaccountOutput{}, err
 	}
 	return nil, BuildWithdrawFromSubaccountOutput{Payload: *p}, nil
+}
+
+// -- build_bank_send (generic x/bank MsgSend) --------------------------
+
+type BuildBankSendInput struct {
+	Recipient       string `json:"recipient" jsonschema:"svp1... bech32 recipient address (may be a third party)"`
+	Denom           string `json:"denom" jsonschema:"bank denom: \"asvp\" (native SVP), \"erc20/usdc\" (USDC), or any ibc/... denom"`
+	Amount          string `json:"amount" jsonschema:"human amount for known denoms (asvp=SVP 18dp, erc20/usdc=USDC 6dp), e.g. \"0.01\"; for other denoms, a base-unit integer"`
+	PayloadClientID string `json:"payload_client_id" jsonschema:"broadcast-idempotency uuid"`
+}
+
+type BuildBankSendOutput struct {
+	Payload payload.TxPayload `json:"payload"`
+}
+
+// resolveSendAmount turns a user denom + amount into a positive sdk.Coin and a
+// human label for the summary. Known denoms (SVP, USDC) accept a human decimal
+// and convert by their decimals; unknown denoms require a base-unit integer
+// since their scale isn't known to the server.
+func resolveSendAmount(denom, amount string) (sdk.Coin, string, error) {
+	if err := sdk.ValidateDenom(denom); err != nil {
+		return sdk.Coin{}, "", fmt.Errorf("invalid denom %q: %w", denom, err)
+	}
+	if meta, ok := knownDenoms[denom]; ok {
+		amt, err := humanToBaseUnits(amount, meta.Decimals)
+		if err != nil {
+			return sdk.Coin{}, "", err
+		}
+		return sdk.NewCoin(denom, amt), fmt.Sprintf("%s %s", amount, meta.Symbol), nil
+	}
+	amt, ok := math.NewIntFromString(amount)
+	if !ok {
+		return sdk.Coin{}, "", fmt.Errorf("unknown denom %q: amount must be a base-unit integer (no decimal point)", denom)
+	}
+	if !amt.IsPositive() {
+		return sdk.Coin{}, "", fmt.Errorf("amount must be > 0")
+	}
+	return sdk.NewCoin(denom, amt), fmt.Sprintf("%s %s", amount, denom), nil
+}
+
+func (h *Handlers) BuildBankSend(
+	ctx context.Context,
+	_ *mcp.CallToolRequest,
+	in BuildBankSendInput,
+) (*mcp.CallToolResult, BuildBankSendOutput, error) {
+	tp, err := h.authorize(ctx, "build_bank_send")
+	if err != nil {
+		return nil, BuildBankSendOutput{}, err
+	}
+
+	coin, amountHuman, err := resolveSendAmount(in.Denom, in.Amount)
+	if err != nil {
+		return nil, BuildBankSendOutput{}, err
+	}
+
+	acc, err := h.Deps.Chain.Account.Account(ctx, tp.Owner)
+	if err != nil {
+		return nil, BuildBankSendOutput{}, fmt.Errorf("read account state: %w", err)
+	}
+
+	_, p, err := builder.BuildBankSend(
+		builder.BankSendInput{
+			Owner:           tp.Owner,
+			Recipient:       in.Recipient,
+			Amount:          coin,
+			AmountHuman:     amountHuman,
+			PayloadClientID: in.PayloadClientID,
+		},
+		h.Deps.Builder,
+		acc.AccountNumber,
+		acc.Sequence,
+	)
+	if err != nil {
+		return nil, BuildBankSendOutput{}, err
+	}
+	return nil, BuildBankSendOutput{Payload: *p}, nil
 }
 
 // -- build_transfer_between_subaccounts (same-owner) -------------------

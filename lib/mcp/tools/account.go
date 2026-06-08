@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"cosmossdk.io/math"
@@ -220,6 +221,25 @@ func humanAmount(amount math.Int, decimals int64) string {
 		s = strings.TrimRight(s, ".")
 	}
 	return s
+}
+
+// humanToBaseUnits is the inverse of humanAmount: it scales a human decimal
+// string up to a base-unit integer for a denom with the given decimals,
+// rejecting amounts finer than the denom can represent (e.g. "0.0000001" USDC
+// at 6 dp). Used by build_bank_send to accept human amounts for known denoms.
+func humanToBaseUnits(human string, decimals int64) (math.Int, error) {
+	dec, err := math.LegacyNewDecFromStr(human)
+	if err != nil {
+		return math.Int{}, fmt.Errorf("invalid amount %q: %w", human, err)
+	}
+	if !dec.IsPositive() {
+		return math.Int{}, fmt.Errorf("amount must be > 0")
+	}
+	scaled := dec.MulInt(math.NewIntWithDecimal(1, int(decimals)))
+	if !scaled.Equal(scaled.TruncateDec()) {
+		return math.Int{}, fmt.Errorf("amount %q has more precision than %d decimals allow", human, decimals)
+	}
+	return scaled.TruncateInt(), nil
 }
 
 // -- whoami -------------------------------------------------------------

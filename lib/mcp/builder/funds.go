@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/limits"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
@@ -140,6 +141,70 @@ func BuildTransferBetweenSubaccounts(
 		AmountHuman:    in.HumanUSDC,
 		RecipientOwner: in.Owner,
 		RecipientNum:   in.RecipientSubaccountNum,
+	}
+	txPayload, err := asm.Assemble(Args{
+		Msgs:          []sdk.Msg{msg},
+		SignerAddress: in.Owner,
+		AccountNumber: accountNumber,
+		Sequence:      sequence,
+		ClientID:      in.PayloadClientID,
+		Summary:       summary,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("assemble: %w", err)
+	}
+	return msg, txPayload, nil
+}
+
+// -- build_bank_send (generic x/bank MsgSend) --------------------------
+
+// BankSendInput drives build_bank_send. Unlike the subaccount funds tools
+// (USDC-only, same-owner), this is a generic cosmos x/bank send: any denom, to
+// an arbitrary recipient. The handler resolves the human/base amount into the
+// Amount coin; the builder just constructs the MsgSend + envelope.
+type BankSendInput struct {
+	Owner     string   // bech32 sender (the tenant owner)
+	Recipient string   // bech32 recipient (may be a third party)
+	Amount    sdk.Coin // resolved denom + base-unit amount
+
+	// AmountHuman is the display string for the summary (e.g. "0.01 SVP");
+	// informational only.
+	AmountHuman string
+
+	PayloadClientID string
+}
+
+// BuildBankSend constructs a bank MsgSend from Owner to Recipient and assembles
+// it into a TxPayload. The fee is stamped by the assembler (a send is not a CLOB
+// msg). No cap is enforced — the signer==owner guard at broadcast already
+// ensures funds only leave the tenant's own wallet.
+func BuildBankSend(
+	in BankSendInput,
+	asm *Assembler,
+	accountNumber, sequence uint64,
+) (*banktypes.MsgSend, *payload.TxPayload, error) {
+	if !in.Amount.IsValid() || !in.Amount.IsPositive() {
+		return nil, nil, fmt.Errorf("amount must be a positive coin")
+	}
+	if _, err := sdk.AccAddressFromBech32(in.Owner); err != nil {
+		return nil, nil, fmt.Errorf("owner: %w", err)
+	}
+	if _, err := sdk.AccAddressFromBech32(in.Recipient); err != nil {
+		return nil, nil, fmt.Errorf("recipient: %w", err)
+	}
+
+	msg := &banktypes.MsgSend{
+		FromAddress: in.Owner,
+		ToAddress:   in.Recipient,
+		Amount:      sdk.NewCoins(in.Amount),
+	}
+
+	summary := payload.Summary{
+		ToolName:       "build_bank_send",
+		MsgTypeURL:     "/cosmos.bank.v1beta1.MsgSend",
+		AmountHuman:    in.AmountHuman,
+		RecipientOwner: in.Recipient,
+		Denom:          in.Amount.Denom,
 	}
 	txPayload, err := asm.Assemble(Args{
 		Msgs:          []sdk.Msg{msg},

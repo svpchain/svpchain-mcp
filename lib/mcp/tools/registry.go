@@ -178,6 +178,11 @@ func Register(srv *mcp.Server, h *Handlers) {
 		Description: "Construct a USDC transfer between two subaccounts under the same owner. Returns a TxPayload — pass to sign_transaction then broadcast_signed_tx. v0.2.3 is same-owner only; cross-owner transfers are deferred until a future version with the right cap surface.",
 	}, h.BuildTransferBetweenSubaccounts)
 
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_bank_send",
+		Description: "Construct a native bank send (cosmos x/bank MsgSend) of any denom from the owner's wallet to an arbitrary recipient address — e.g. send SVP (denom \"asvp\") or USDC (\"erc20/usdc\") to a third party. Amount is human units for known denoms (SVP, USDC) or base units otherwise. Returns a TxPayload — pass to sign_transaction (local signer) then broadcast_signed_tx to land on chain.",
+	}, h.BuildBankSend)
+
 	// E. Cross-cutting.
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "broadcast_signed_tx",

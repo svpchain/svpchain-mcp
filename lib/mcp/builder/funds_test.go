@@ -3,6 +3,8 @@ package builder_test
 import (
 	"testing"
 
+	"cosmossdk.io/math"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/require"
 
 	// testOwner, newTestAsm, and the app/config blank-import live in
@@ -10,6 +12,58 @@ import (
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
 	assettypes "github.com/dydxprotocol/v4-chain/protocol/x/assets/types"
 )
+
+// testRecipient is a second valid svp bech32 address (distinct from testOwner)
+// for bank-send tests.
+const testRecipient = "svp1n7rdhntv4w4j30t4g76aavg3k20mdv3zjsn3q5"
+
+func TestBuildBankSend_Happy(t *testing.T) {
+	msg, p, err := builder.BuildBankSend(builder.BankSendInput{
+		Owner:           testOwner,
+		Recipient:       testRecipient,
+		Amount:          sdk.NewCoin("asvp", math.NewIntWithDecimal(1, 16)), // 0.01 SVP
+		AmountHuman:     "0.01 SVP",
+		PayloadClientID: "uuid-send-1",
+	}, newTestAsm(t), 7, 17)
+	require.NoError(t, err)
+	require.Equal(t, testOwner, msg.FromAddress)
+	require.Equal(t, testRecipient, msg.ToAddress)
+	require.Equal(t, "10000000000000000asvp", msg.Amount.String())
+	require.Equal(t, "/cosmos.bank.v1beta1.MsgSend", p.Summary.MsgTypeURL)
+	require.Equal(t, "0.01 SVP", p.Summary.AmountHuman)
+	require.Equal(t, "asvp", p.Summary.Denom)
+	require.Equal(t, testRecipient, p.Summary.RecipientOwner)
+	require.False(t, p.IsShortTermCLOB, "a bank send is not a short-term CLOB msg")
+	// Non-CLOB txs carry the configured fee.
+	require.Len(t, p.Fee.Amount, 1)
+	require.Equal(t, testFeeAmount, p.Fee.Amount[0].Amount)
+}
+
+func TestBuildBankSend_Rejects(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      builder.BankSendInput
+		wantErr string
+	}{
+		{
+			name:    "bad recipient bech32",
+			in:      builder.BankSendInput{Owner: testOwner, Recipient: "not-a-bech32", Amount: sdk.NewCoin("asvp", math.NewInt(1)), PayloadClientID: "u"},
+			wantErr: "recipient",
+		},
+		{
+			name:    "zero amount",
+			in:      builder.BankSendInput{Owner: testOwner, Recipient: testRecipient, Amount: sdk.NewCoin("asvp", math.NewInt(0)), PayloadClientID: "u"},
+			wantErr: "positive",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := builder.BuildBankSend(tc.in, newTestAsm(t), 1, 1)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
 
 func TestBuildDepositToSubaccount_Happy(t *testing.T) {
 	msg, p, err := builder.BuildDepositToSubaccount(builder.DepositToSubaccountInput{
