@@ -119,10 +119,15 @@ type Summary struct {
 //
 // All three fields are standard-base64 strings. See the comment on
 // TxPayload's TxBodyBytesB64 for why we use string rather than []byte.
+//
+// The jsonschema descriptions instruct the MCP client (an LLM) to relay every
+// field byte-for-byte from sign_transaction. These are opaque encoded blobs;
+// the long TxRawBytesB64 in particular breaks the broadcast if a single
+// character is dropped, re-wrapped, or "normalized" in transit.
 type SignedTx struct {
-	TxRawBytesB64 string `json:"tx_raw_bytes_b64"`
-	SignatureB64  string `json:"signature_b64"`
-	PubKeyB64     string `json:"pub_key_b64"`
+	TxRawBytesB64 string `json:"tx_raw_bytes_b64" jsonschema:"The signed transaction, standard base64. Copy this VERBATIM from sign_transaction's output. Do NOT modify, truncate, re-encode, pretty-print, line-wrap, add or strip whitespace, or otherwise normalize it — pass the exact string through."`
+	SignatureB64  string `json:"signature_b64" jsonschema:"The signature, standard base64. Copy this VERBATIM from sign_transaction's output — do not modify, re-encode, or normalize it."`
+	PubKeyB64     string `json:"pub_key_b64" jsonschema:"The signer public key, standard base64. Copy this VERBATIM from sign_transaction's output — do not modify, re-encode, or normalize it."`
 }
 
 // BroadcastResult is the return shape of broadcast_signed_tx after a

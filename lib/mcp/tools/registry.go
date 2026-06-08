@@ -186,7 +186,7 @@ func Register(srv *mcp.Server, h *Handlers) {
 	// E. Cross-cutting.
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "broadcast_signed_tx",
-		Description: "Broadcast a tx signed locally by the MCP client — typically the SignedTx returned by sign_transaction on the local signer MCP server. Verifies the embedded signer address matches the tenant owner before broadcasting.",
+		Description: "Broadcast a tx signed locally by the MCP client — the SignedTx returned by sign_transaction on the local signer MCP server. Pass the signed_tx object through with every field copied VERBATIM from sign_transaction (tx_raw_bytes_b64, signature_b64, pub_key_b64) — do not modify, re-encode, or reformat any of them. Verifies the embedded signer address matches the tenant owner before broadcasting.",
 	}, h.BroadcastSignedTx)
 
 	mcp.AddTool(srv, &mcp.Tool{
