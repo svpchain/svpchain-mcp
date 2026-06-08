@@ -208,16 +208,29 @@ func Register(srv *mcp.Server, h *Handlers) {
 		Description: "Verify a signature over a previously-issued challenge nonce; if it recovers to the same address the nonce was issued for, mint a bearer token bound to that owner. Use the returned bearer_token in the Authorization header for every subsequent request until expires_at.",
 	}, h.AuthVerify)
 
-	// G. EVM. The EVM write flow mirrors the Cosmos one but over JSON-RPC:
+	// G. Faucet (HTTP). The faucet backend runs its own operator that signs
+	// and submits the on-chain claim, so these tools dispense funds in one
+	// call — no client-side signing, EVM RPC, or contract address.
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "list_faucet_tokens",
+		Description: "List the tokens the faucet will dispense, each with its per-claim amount (base units). Call before faucet_claim to discover the native token and any claimable ERC-20 addresses.",
+	}, h.ListFaucetTokens)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "faucet_claim",
+		Description: "Claim test funds from the faucet to your own wallet (the authenticated owner's EVM address). The faucet operator signs and submits the on-chain transfer; returns the resulting tx_hash and amount. Omit token (or pass 0x0) for the native token (SVP); pass an ERC-20 address from list_faucet_tokens otherwise. Rate-limited per address/token by the faucet.",
+	}, h.FaucetClaim)
+
+	// H. EVM. The EVM write flow mirrors the Cosmos one but over JSON-RPC:
 	// build_<contract>_<action> → sign_evm_transaction (local signer) →
 	// broadcast_evm_tx (this server) → evm_tx_status. broadcast_evm_tx and
 	// evm_tx_status are contract-agnostic; per-contract build_* tools sit above.
 	registerEVMTools(srv, h)
 }
 
-// registerEVMTools registers the EVM tool family. Adding a new EVM contract
-// adds its build_* tool here next to build_faucet_claim — no other registry
-// changes.
+// registerEVMTools registers the contract-agnostic EVM engine tools. Adding a
+// new EVM contract adds its build_* tool here alongside them — no other
+// registry changes.
 func registerEVMTools(srv *mcp.Server, h *Handlers) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "broadcast_evm_tx",
@@ -228,10 +241,4 @@ func registerEVMTools(srv *mcp.Server, h *Handlers) {
 		Name:        "evm_tx_status",
 		Description: "Poll the EVM JSON-RPC for the receipt of a previously broadcast EVM tx by hash. Returns status pending (not yet included), success, or failed.",
 	}, h.EVMTxStatus)
-
-	// Per-contract build_* tools.
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "build_faucet_claim",
-		Description: "Construct (but do not sign) a faucet claim transaction. Returns an EVMTxPayload — pass to sign_evm_transaction (svpchain signer MCP) then broadcast_evm_tx to land on chain.",
-	}, h.BuildFaucetClaim)
 }

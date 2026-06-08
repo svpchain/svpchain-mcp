@@ -7,6 +7,7 @@ import (
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/faucet"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/limits"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
@@ -24,20 +25,17 @@ type ChainDeps struct {
 	CometBft        chain.CometBftClient
 
 	// EVM is the EVM JSON-RPC client backing the EVM tool family
-	// (build_faucet_claim, broadcast_evm_tx, evm_tx_status). Nil when the
-	// server is configured without evm_rpc_url; EVM tools refuse in that case.
+	// (broadcast_evm_tx, evm_tx_status, and future per-contract build_*
+	// tools). Nil when the server is configured without evm_rpc_url; EVM
+	// tools refuse in that case.
 	EVM chain.EVMClient
 }
 
 // EVMDeps groups the EVM build-path dependencies: the contract-agnostic
-// assembler plus the deployment-specific contract addresses (sourced from
-// config). Adding a new EVM contract adds a field here for its address.
+// assembler that fills nonce/gas/fees for per-contract build_* tools. Adding a
+// new EVM contract adds its deployment-specific address here.
 type EVMDeps struct {
 	Assembler *builder.EVMAssembler
-
-	// FaucetAddress is the 0x address of the faucet contract; empty when the
-	// faucet is not configured.
-	FaucetAddress string
 }
 
 // Deps is the full dependency bundle every tool handler receives. v0.1
@@ -48,6 +46,11 @@ type Deps struct {
 	Indexer *indexer.Client
 	Markets *markets.Cache
 	Builder *builder.Assembler
+
+	// Faucet is the HTTP client for the faucet backend (faucet_base_url).
+	// Nil when the server runs without faucet_base_url; the faucet tools
+	// check Faucet != nil and refuse otherwise.
+	Faucet *faucet.Client
 
 	// EVM holds the EVM build dependencies (assembler + per-contract
 	// addresses). Zero-valued when the server runs without evm_rpc_url; EVM

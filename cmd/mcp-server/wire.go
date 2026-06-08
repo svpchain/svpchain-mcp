@@ -12,6 +12,7 @@ import (
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/faucet"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/limits"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/logging"
@@ -80,9 +81,16 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 		}
 		chainDeps.EVM = evmClient
 		evmDeps = tools.EVMDeps{
-			Assembler:     builder.NewEVMAssembler(evmClient),
-			FaucetAddress: cfg.EVM.Faucet.Address,
+			Assembler: builder.NewEVMAssembler(evmClient),
 		}
+	}
+
+	// Faucet is optional: only wire the HTTP client when a faucet_base_url is
+	// configured. Without it, the faucet tools refuse at call time
+	// (Deps.Faucet stays nil) and non-faucet deployments are unaffected.
+	var faucetClient *faucet.Client
+	if cfg.FaucetBaseURL != "" {
+		faucetClient = faucet.NewClient(cfg.FaucetBaseURL, faucet.Options{})
 	}
 
 	// Indexer + markets cache.
@@ -125,6 +133,7 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 		Indexer:           idx,
 		Markets:           mkts,
 		Builder:           builder.NewAssembler(cfg.ChainID, cfg.Fee.Denom, cfg.Fee.Amount, cfg.Fee.GasLimit),
+		Faucet:            faucetClient,
 		EVM:               evmDeps,
 		Policy:            policyEngine,
 		Auditor:           policy.NewStdoutAuditor(),

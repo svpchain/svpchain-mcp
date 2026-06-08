@@ -37,9 +37,9 @@ func newEVMPayload(signerAddr string) *payload.EVMTxPayload {
 		MaxFeePerGas:         "5000000000",
 		MaxPriorityFeePerGas: "1000000000",
 		Value:                "0",
-		Data:                 "0x4e71d92d", // claim() selector
+		Data:                 "0x4e71d92d", // arbitrary 4-byte selector
 		ExpiresAt:            time.Now().UTC().Add(30 * time.Second),
-		Summary:              payload.EVMSummary{ToolName: "build_faucet_claim", Description: "faucet claim()"},
+		Summary:              payload.EVMSummary{ToolName: "build_evm_tx", Description: "evm tx"},
 	}
 }
 

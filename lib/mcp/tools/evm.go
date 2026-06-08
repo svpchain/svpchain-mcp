@@ -12,15 +12,15 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/policy"
 )
 
 // This file holds the EVM tool family. The two tools below are
 // contract-agnostic engine tools (written once, shared by every EVM contract);
-// per-contract build_* tools (build_faucet_claim, later build_swap, …) live
-// alongside them and call EVMAssembler.Assemble.
+// per-contract build_* tools (e.g. a future build_swap) live alongside them
+// and call EVMAssembler.Assemble. ownerEthAddress is shared with the HTTP
+// faucet tools (faucet.go) since both map a bech32 owner to its 0x address.
 
 // ownerEthAddress converts a tenant's bech32 owner (svp1…) to its 0x EVM
 // address. Both are the same 20 underlying bytes — the same identity the auth
@@ -31,58 +31,6 @@ func ownerEthAddress(owner string) (common.Address, error) {
 		return common.Address{}, fmt.Errorf("parse owner %q: %w", owner, err)
 	}
 	return common.BytesToAddress(acc.Bytes()), nil
-}
-
-// -- build_faucet_claim (per-contract) ---------------------------------
-
-type BuildFaucetClaimInput struct {
-	PayloadClientID string `json:"payload_client_id" jsonschema:"broadcast-idempotency uuid; reuse the same value when you later call broadcast_evm_tx"`
-}
-
-type BuildFaucetClaimOutput struct {
-	Payload payload.EVMTxPayload `json:"payload"`
-}
-
-func (h *Handlers) BuildFaucetClaim(
-	ctx context.Context,
-	_ *mcp.CallToolRequest,
-	in BuildFaucetClaimInput,
-) (*mcp.CallToolResult, BuildFaucetClaimOutput, error) {
-	tp, err := h.authorize(ctx, "build_faucet_claim")
-	if err != nil {
-		return nil, BuildFaucetClaimOutput{}, err
-	}
-	if h.Deps.EVM.Assembler == nil {
-		return nil, BuildFaucetClaimOutput{}, userErrf("EVM is not enabled on this server (no evm_rpc_url configured)")
-	}
-	if h.Deps.EVM.FaucetAddress == "" {
-		return nil, BuildFaucetClaimOutput{}, userErrf("faucet contract is not configured (set [evm.faucet] address)")
-	}
-
-	from, err := ownerEthAddress(tp.Owner)
-	if err != nil {
-		return nil, BuildFaucetClaimOutput{}, err
-	}
-	to, data, err := builder.BuildFaucetClaim(builder.FaucetClaimArgs{
-		Contract: common.HexToAddress(h.Deps.EVM.FaucetAddress),
-	})
-	if err != nil {
-		return nil, BuildFaucetClaimOutput{}, err
-	}
-	p, err := h.Deps.EVM.Assembler.Assemble(ctx, builder.EVMArgs{
-		ClientID: in.PayloadClientID,
-		From:     from,
-		To:       to,
-		Data:     data,
-		Summary: payload.EVMSummary{
-			ToolName:    "build_faucet_claim",
-			Description: "faucet claim()",
-		},
-	})
-	if err != nil {
-		return nil, BuildFaucetClaimOutput{}, err
-	}
-	return nil, BuildFaucetClaimOutput{Payload: *p}, nil
 }
 
 // -- broadcast_evm_tx --------------------------------------------------

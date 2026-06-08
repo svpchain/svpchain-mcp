@@ -66,7 +66,7 @@ func TestEVMAssembler_Assemble(t *testing.T) {
 		From:     from,
 		To:       to,
 		Data:     data,
-		Summary:  payload.EVMSummary{ToolName: "build_faucet_claim"},
+		Summary:  payload.EVMSummary{ToolName: "build_evm_tx"},
 	})
 	require.NoError(t, err)
 
@@ -110,7 +110,7 @@ func TestEVMTxPayload_WireShapeMatchesSigner(t *testing.T) {
 		MaxPriorityFeePerGas: "1000000000",
 		Value:                "0",
 		Data:                 "0x4e71d92d",
-		Summary:              payload.EVMSummary{ToolName: "build_faucet_claim", Description: "faucet claim()"},
+		Summary:              payload.EVMSummary{ToolName: "build_evm_tx", Description: "evm tx"},
 	}
 	b, err := json.Marshal(p)
 	require.NoError(t, err)
@@ -131,14 +131,4 @@ func TestEVMTxPayload_WireShapeMatchesSigner(t *testing.T) {
 		_, ok := m[k]
 		require.Falsef(t, ok, "unexpected legacy JSON key %q (drifted from signer)", k)
 	}
-}
-
-func TestBuildFaucetClaim_PacksSelector(t *testing.T) {
-	contract := common.HexToAddress("0x2222222222222222222222222222222222222222")
-	to, data, err := builder.BuildFaucetClaim(builder.FaucetClaimArgs{Contract: contract})
-	require.NoError(t, err)
-	require.Equal(t, contract, to)
-	// claim() takes no args, so calldata is exactly the 4-byte selector.
-	require.Equal(t, builder.FaucetABI.Methods["claim"].ID, data)
-	require.Len(t, data, 4)
 }

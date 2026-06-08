@@ -147,7 +147,7 @@ const (
 )
 
 // EVMTxPayload is the on-wire envelope returned by every EVM build_* tool
-// (e.g. build_faucet_claim). It is the Ethereum-tx analog of TxPayload: the
+// (e.g. a future build_swap). It is the Ethereum-tx analog of TxPayload: the
 // remote MCP server fills every field from chain state + the per-contract
 // calldata, the local signer (svpchain-signer-mcp's sign_evm_transaction tool)
 // turns it into a signed EIP-1559 transaction, and broadcast_evm_tx submits

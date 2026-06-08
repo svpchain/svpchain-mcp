@@ -24,8 +24,8 @@ const (
 )
 
 // EVMAssembler is the contract-agnostic core of the EVM build path. Given a
-// destination + calldata produced by a per-contract builder (faucet, later
-// swap, …), it queries the EVM client for the chain-derived fields
+// destination + calldata produced by a per-contract builder (e.g. a future
+// swap), it queries the EVM client for the chain-derived fields
 // (nonce/gas/fee-caps/chainID) and stamps a ready-to-sign EVMTxPayload.
 //
 // This is the seam that keeps new contracts cheap: a per-contract builder only
