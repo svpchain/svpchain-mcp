@@ -49,23 +49,37 @@ var maxUint256 = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewI
 
 // -- token / plan helpers (pure, unit-tested) --------------------------
 
-// knownSwapTokens maps lower-case symbol aliases to the ERC-20 addresses of
-// this deployment, so an agent can pass token_in/token_out="usdv" instead of
-// the raw 0x address (native SVP is named separately, in parseSwapToken). These
-// are convenience aliases only — a caller can always pass any 0x address, or
+// knownToken is one registered ERC-20 for this deployment: its address plus
+// whether that balance is also represented by an x/bank denom.
+//
+// bankLinked tokens (e.g. USDC, the EVM side of the erc20/usdc trading
+// collateral) already surface through get_balance's bank read, so they are NOT
+// additionally contract-read there — that would double-count the same balance.
+// Pure ERC-20s (USDV) have no bank denom and ARE contract-read. The distinction
+// only affects get_balance; swap aliases and faucet labels use every entry.
+type knownToken struct {
+	address    common.Address
+	bankLinked bool
+}
+
+// knownSwapTokens maps lower-case symbol aliases to this deployment's ERC-20s,
+// so an agent can pass token_in/token_out="usdv" / "usdc" instead of the raw 0x
+// address (native SVP is named separately, in parseSwapToken). These are
+// convenience aliases only — a caller can always pass any 0x address, or
 // discover faucet-dispensed tokens via list_faucet_tokens. Hardcoded like
-// knownDenoms in account.go; decimals are still read on chain at call time. It
-// is also the source for labeling known ERC-20s by symbol in faucet output
-// (see faucet.go).
-var knownSwapTokens = map[string]common.Address{
-	"usdv": common.HexToAddress("0x013a61E622e6ABFCaB64F52D274C3Fc0aA37f951"),
+// knownDenoms in account.go; decimals are still read on chain at call time. Also
+// the source for labeling known ERC-20s by symbol in faucet output (faucet.go)
+// and for the contract-read balances in get_balance (account.go).
+var knownSwapTokens = map[string]knownToken{
+	"usdv": {address: common.HexToAddress("0x013a61E622e6ABFCaB64F52D274C3Fc0aA37f951")},
+	"usdc": {address: common.HexToAddress("0x732F6Ea7AfD5EdC02e7ba052075dd0780e285489"), bankLinked: true},
 }
 
 // knownTokenSymbol reverse-maps an ERC-20 address to its upper-cased symbol
 // alias, if one is registered in knownSwapTokens.
 func knownTokenSymbol(addr common.Address) (string, bool) {
-	for sym, a := range knownSwapTokens {
-		if a == addr {
+	for sym, kt := range knownSwapTokens {
+		if kt.address == addr {
 			return strings.ToUpper(sym), true
 		}
 	}
@@ -83,8 +97,8 @@ func parseSwapToken(s string) (addr common.Address, native bool, err error) {
 	case "", "native", "svp":
 		return common.Address{}, true, nil
 	}
-	if a, ok := knownSwapTokens[key]; ok {
-		return a, false, nil
+	if kt, ok := knownSwapTokens[key]; ok {
+		return kt.address, false, nil
 	}
 	if !common.IsHexAddress(t) {
 		return common.Address{}, false, fmt.Errorf(

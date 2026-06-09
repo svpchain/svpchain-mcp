@@ -209,6 +209,8 @@ func (h *Handlers) GetBalance(
 
 // erc20Balances reads the owner's balance of each known pure-ERC-20 token (see
 // knownSwapTokens) straight from its contract, since they have no x/bank denom.
+// bankLinked tokens (e.g. USDC -> erc20/usdc) are skipped: their balance already
+// comes back via the bank read, so contract-reading them would double-count.
 // Best-effort by design: returns nil (no error) when EVM/swaps are disabled,
 // and silently skips any token whose balanceOf/decimals read fails or whose
 // balance is zero — get_balance must still return bank balances regardless.
@@ -229,17 +231,20 @@ func (h *Handlers) erc20Balances(ctx context.Context, owner string) []BalanceDTO
 
 	var out []BalanceDTO
 	for _, sym := range symbols {
-		addr := knownSwapTokens[sym]
-		bal, err := h.erc20Balance(ctx, addr, ownerEth)
+		kt := knownSwapTokens[sym]
+		if kt.bankLinked {
+			continue // already returned by the x/bank read; don't double-count
+		}
+		bal, err := h.erc20Balance(ctx, kt.address, ownerEth)
 		if err != nil || bal.Sign() <= 0 {
 			continue
 		}
-		dec, err := h.tokenDecimals(ctx, false, addr)
+		dec, err := h.tokenDecimals(ctx, false, kt.address)
 		if err != nil {
 			continue
 		}
 		out = append(out, BalanceDTO{
-			Denom:   addr.Hex(),
+			Denom:   kt.address.Hex(),
 			Amount:  bal.String(),
 			Symbol:  strings.ToUpper(sym),
 			Display: humanAmount(math.NewIntFromBigInt(bal), dec),

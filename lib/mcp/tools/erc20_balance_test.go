@@ -68,6 +68,9 @@ func handlersWithEVM(t *testing.T, evm *mockBalanceEVM) *Handlers {
 }
 
 func TestErc20Balances_KnownTokenAppears(t *testing.T) {
+	// The mock returns a positive balance for ANY balanceOf, so if the
+	// bank-linked USDC weren't skipped it would also appear (len 2). Only the
+	// pure-ERC-20 USDV is contract-read here.
 	h := handlersWithEVM(t, &mockBalanceEVM{balance: big.NewInt(2_500_000), decimals: 6})
 
 	got := h.erc20Balances(context.Background(), testTxOwner)
@@ -79,6 +82,17 @@ func TestErc20Balances_KnownTokenAppears(t *testing.T) {
 	require.Equal(t, "2.5", usdv.Display) // 2_500_000 at 6 dp
 	// Denom is the checksummed contract address.
 	require.Equal(t, common.HexToAddress("0x013a61E622e6ABFCaB64F52D274C3Fc0aA37f951").Hex(), usdv.Denom)
+}
+
+func TestErc20Balances_BankLinkedTokenExcluded(t *testing.T) {
+	// USDC is bank-linked: get_balance surfaces it via the x/bank read, so
+	// erc20Balances must never contract-read it (that would double-count).
+	h := handlersWithEVM(t, &mockBalanceEVM{balance: big.NewInt(2_500_000), decimals: 6})
+	usdc := common.HexToAddress("0x732F6Ea7AfD5EdC02e7ba052075dd0780e285489").Hex()
+	for _, b := range h.erc20Balances(context.Background(), testTxOwner) {
+		require.NotEqual(t, "USDC", b.Symbol)
+		require.NotEqual(t, usdc, b.Denom)
+	}
 }
 
 func TestErc20Balances_ZeroBalanceOmitted(t *testing.T) {

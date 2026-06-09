@@ -2,6 +2,7 @@ package tools
 
 import (
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -31,12 +32,17 @@ func TestParseSwapToken_ERC20(t *testing.T) {
 }
 
 func TestParseSwapToken_KnownSymbol(t *testing.T) {
-	usdv := common.HexToAddress("0x013a61E622e6ABFCaB64F52D274C3Fc0aA37f951")
-	for _, in := range []string{"usdv", "USDV", " UsdV "} {
-		addr, native, err := parseSwapToken(in)
-		require.NoError(t, err, "input %q", in)
-		require.False(t, native, "input %q should resolve to an ERC-20", in)
-		require.Equal(t, usdv, addr, "input %q", in)
+	cases := map[string]common.Address{
+		"usdv": common.HexToAddress("0x013a61E622e6ABFCaB64F52D274C3Fc0aA37f951"),
+		"usdc": common.HexToAddress("0x732F6Ea7AfD5EdC02e7ba052075dd0780e285489"),
+	}
+	for sym, want := range cases {
+		for _, in := range []string{sym, strings.ToUpper(sym), " " + sym + " "} {
+			addr, native, err := parseSwapToken(in)
+			require.NoError(t, err, "input %q", in)
+			require.False(t, native, "input %q should resolve to an ERC-20", in)
+			require.Equal(t, want, addr, "input %q", in)
+		}
 	}
 }
 
@@ -103,6 +109,8 @@ func TestTokenLabel(t *testing.T) {
 	// A known alias renders as its upper-cased symbol, not the raw address.
 	usdv := common.HexToAddress("0x013a61E622e6ABFCaB64F52D274C3Fc0aA37f951")
 	require.Equal(t, "USDV", tokenLabel(false, usdv))
+	usdc := common.HexToAddress("0x732F6Ea7AfD5EdC02e7ba052075dd0780e285489")
+	require.Equal(t, "USDC", tokenLabel(false, usdc))
 }
 
 func TestAddrsToHex(t *testing.T) {
