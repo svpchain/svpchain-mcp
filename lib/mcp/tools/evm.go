@@ -1,9 +1,11 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	ethereum "github.com/ethereum/go-ethereum"
@@ -85,6 +87,24 @@ func (h *Handlers) BroadcastEVMTx(
 			"evm sender %s does not match tenant owner %s", from.Hex(), ownerEth.Hex())
 	}
 
+	// Per-symbol daily transfer-out cap (EVM rail): native-value sends and
+	// direct ERC-20 transfers accumulate against the same per-tenant ledger as
+	// x/bank sends, so e.g. usdc leaving via bank and via its ERC-20 share one
+	// daily total. Recorded only after a successful send, below. The router /
+	// WSVP addresses (zero when swaps are disabled) let the decoder exclude
+	// swap/wrap legs.
+	var router, wsvp common.Address
+	if h.Deps.EVM.Uniswap != nil {
+		router = h.Deps.EVM.Uniswap.Router()
+		wsvp = h.Deps.EVM.Uniswap.WSVP()
+	}
+	transferOut := decodeTransferOut(tx.To(), tx.Value(), tx.Data(), ownerEth, router, wsvp)
+	for sym, amt := range transferOut {
+		if err := h.Deps.TransferOut.Check(tp.TenantID, sym, amt); err != nil {
+			return nil, BroadcastEVMTxOutput{}, err
+		}
+	}
+
 	txHash, sendErr := h.Deps.Chain.EVM.SendTransaction(ctx, &tx)
 	outcome := "broadcast"
 	reason := ""
@@ -105,7 +125,70 @@ func (h *Handlers) BroadcastEVMTx(
 	if sendErr != nil {
 		return nil, BroadcastEVMTxOutput{}, fmt.Errorf("broadcast evm tx: %w", sendErr)
 	}
+	// Spend only after the node accepts the tx — a rejected broadcast doesn't
+	// eat the tenant's daily cap.
+	for sym, amt := range transferOut {
+		h.Deps.TransferOut.Record(tp.TenantID, sym, amt)
+	}
 	return nil, BroadcastEVMTxOutput{TxHash: txHash}, nil
+}
+
+// ERC-20 method selectors (first 4 bytes of keccak256 of the signature).
+var (
+	selERC20Transfer     = []byte{0xa9, 0x05, 0x9c, 0xbb} // transfer(address,uint256)
+	selERC20TransferFrom = []byte{0x23, 0xb8, 0x72, 0xdd} // transferFrom(address,address,uint256)
+)
+
+// decodeTransferOut inspects a single signed EVM tx and returns the tenant's
+// outbound amounts grouped by cap symbol: `svp` for a native value transfer,
+// and a known token's symbol (usdc / usdv) for a direct ERC-20
+// transfer/transferFrom to that token's contract.
+//
+// It matches ONLY top-level transfer/transferFrom calls and plain value sends.
+// A Uniswap swap is a call to the router (which pulls tokens internally via its
+// own transferFrom) and an approval uses the approve selector — neither is a
+// top-level transfer to a known token, so swaps and approvals are not counted,
+// honouring the "bank + EVM transfers, not swaps" scope. The router/WSVP guard
+// additionally drops the native-value leg of a native→token swap or a wrap.
+func decodeTransferOut(to *common.Address, value *big.Int, data []byte, owner, router, wsvp common.Address) map[string]*big.Int {
+	out := map[string]*big.Int{}
+	addOut := func(sym string, amt *big.Int) {
+		if amt == nil || amt.Sign() <= 0 {
+			return
+		}
+		if cur := out[sym]; cur != nil {
+			out[sym] = new(big.Int).Add(cur, amt)
+		} else {
+			out[sym] = new(big.Int).Set(amt)
+		}
+	}
+
+	// Native SVP value transfer — excluding sends to the router / WSVP, which
+	// are the swap and wrap legs we intentionally don't cap.
+	if value != nil && value.Sign() > 0 && to != nil && *to != router && *to != wsvp {
+		if sym, ok := symbolForNative(); ok {
+			addOut(sym, value)
+		}
+	}
+
+	// Direct ERC-20 transfer / transferFrom to a known token contract.
+	if to != nil && len(data) >= 4 {
+		if sym, ok := symbolForToken(*to); ok {
+			switch {
+			case bytes.Equal(data[:4], selERC20Transfer) && len(data) >= 4+64:
+				// transfer(to, amount): amount is the 2nd 32-byte word.
+				addOut(sym, new(big.Int).SetBytes(data[4+32:4+64]))
+			case bytes.Equal(data[:4], selERC20TransferFrom) && len(data) >= 4+96:
+				// transferFrom(from, to, amount): count only the owner's own
+				// outflow. `from` is the low 20 bytes of the 1st word.
+				from := common.BytesToAddress(data[4+12 : 4+32])
+				if from == owner {
+					addOut(sym, new(big.Int).SetBytes(data[4+64:4+96]))
+				}
+			}
+		}
+	}
+	return out
 }
 
 // -- evm_tx_status -----------------------------------------------------

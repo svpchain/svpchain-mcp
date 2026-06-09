@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"math/big"
 
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	txtypes "github.com/cosmos/cosmos-sdk/types/tx"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/cosmos/gogoproto/proto"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -80,6 +82,21 @@ func (h *Handlers) BroadcastSignedTx(
 		}
 	}
 
+	// Per-symbol daily transfer-out cap (x/bank rail). Sum the signer's own
+	// outbound MsgSend amounts by cap symbol (svp / usdc / …) and check them
+	// against the same per-tenant store the EVM rail records into — so a usdc
+	// bank send and a usdc ERC-20 transfer share one daily total. Recorded
+	// only after a successful broadcast, below.
+	bankOut, err := extractBankSends(rawBytes, h.Deps.InterfaceRegistry, signerAddr)
+	if err != nil {
+		return nil, BroadcastSignedTxOutput{}, fmt.Errorf("inspect tx: %w", err)
+	}
+	for sym, amt := range bankOut {
+		if err := h.Deps.TransferOut.Check(tp.TenantID, sym, amt); err != nil {
+			return nil, BroadcastSignedTxOutput{}, err
+		}
+	}
+
 	res, err := h.Deps.Chain.Broadcast.BroadcastSync(ctx, rawBytes)
 	outcome := "broadcast"
 	if err != nil {
@@ -112,6 +129,11 @@ func (h *Handlers) BroadcastSignedTx(
 	// doesn't eat the tenant's daily cap.
 	if res.Code == 0 && withdrawQ > 0 && h.Deps.WithdrawLedger != nil {
 		h.Deps.WithdrawLedger.Record(tp.TenantID, withdrawQ)
+	}
+	if res.Code == 0 {
+		for sym, amt := range bankOut {
+			h.Deps.TransferOut.Record(tp.TenantID, sym, amt)
+		}
 	}
 	return nil, BroadcastSignedTxOutput{Result: payload.BroadcastResult{
 		TxHash: res.TxHash,
@@ -154,6 +176,46 @@ func extractWithdrawQuantums(rawTxBytes []byte, reg codectypes.InterfaceRegistry
 		total = sum
 	}
 	return total, nil
+}
+
+// extractBankSends sums the signer's outbound x/bank MsgSend amounts, grouped
+// by cap symbol (svp / usdc / …). Only sends whose FromAddress is the tx signer
+// count — a tenant's tx can't carry someone else's send, but the check makes
+// the intent explicit. Denoms with no cap symbol are ignored (uncapped).
+// Returns an empty map when there are no qualifying sends.
+func extractBankSends(rawTxBytes []byte, reg codectypes.InterfaceRegistry, signerAddr string) (map[string]*big.Int, error) {
+	var txRaw txtypes.TxRaw
+	if err := proto.Unmarshal(rawTxBytes, &txRaw); err != nil {
+		return nil, fmt.Errorf("unmarshal TxRaw: %w", err)
+	}
+	var body txtypes.TxBody
+	if err := proto.Unmarshal(txRaw.BodyBytes, &body); err != nil {
+		return nil, fmt.Errorf("unmarshal TxBody: %w", err)
+	}
+	out := map[string]*big.Int{}
+	for _, anyMsg := range body.Messages {
+		var msg sdk.Msg
+		if err := reg.UnpackAny(anyMsg, &msg); err != nil {
+			// Unknown msg type — not a send we care about.
+			continue
+		}
+		send, ok := msg.(*banktypes.MsgSend)
+		if !ok || send.FromAddress != signerAddr {
+			continue
+		}
+		for _, c := range send.Amount {
+			sym, ok := symbolForDenom(c.Denom)
+			if !ok {
+				continue
+			}
+			cur := out[sym]
+			if cur == nil {
+				cur = big.NewInt(0)
+			}
+			out[sym] = new(big.Int).Add(cur, c.Amount.BigInt())
+		}
+	}
+	return out, nil
 }
 
 // signerAddressFromTxRaw decodes a TxRaw bytes blob, extracts the first

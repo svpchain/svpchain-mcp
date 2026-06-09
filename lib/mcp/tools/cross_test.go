@@ -3,8 +3,11 @@ package tools
 import (
 	"testing"
 
+	sdkmath "cosmossdk.io/math"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	txtypes "github.com/cosmos/cosmos-sdk/types/tx"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/cosmos/gogoproto/proto"
 	"github.com/stretchr/testify/require"
 
@@ -90,6 +93,61 @@ func TestExtractWithdrawQuantums(t *testing.T) {
 
 	t.Run("malformed bytes — error not panic", func(t *testing.T) {
 		_, err := extractWithdrawQuantums([]byte{0xff, 0xff, 0xff}, reg)
+		require.Error(t, err)
+	})
+}
+
+func TestExtractBankSends(t *testing.T) {
+	reg := app.GetEncodingConfig().InterfaceRegistry
+	// A distinct, valid bech32 address to play sender/recipient roles.
+	otherAddr := sdk.AccAddress(make([]byte, 20)).String()
+
+	coin := func(denom string, n int64) sdk.Coin { return sdk.NewCoin(denom, sdkmath.NewInt(n)) }
+	send := func(from, to string, coins ...sdk.Coin) *banktypes.MsgSend {
+		return &banktypes.MsgSend{FromAddress: from, ToAddress: to, Amount: sdk.NewCoins(coins...)}
+	}
+
+	t.Run("no sends — empty map", func(t *testing.T) {
+		out, err := extractBankSends(txRawWith(t), reg, testTxOwner)
+		require.NoError(t, err)
+		require.Empty(t, out)
+	})
+
+	t.Run("usdc + svp grouped by symbol", func(t *testing.T) {
+		msg := send(testTxOwner, otherAddr,
+			coin(assettypes.UusdcDenom, 1_500_000),  // 1.5 usdc
+			coin("asvp", 2_000_000_000_000_000_000), // 2 svp
+		)
+		out, err := extractBankSends(txRawWith(t, msg), reg, testTxOwner)
+		require.NoError(t, err)
+		require.Equal(t, "1500000", out["usdc"].String())
+		require.Equal(t, "2000000000000000000", out["svp"].String())
+	})
+
+	t.Run("two usdc sends summed", func(t *testing.T) {
+		m1 := send(testTxOwner, otherAddr, coin(assettypes.UusdcDenom, 1_000_000))
+		m2 := send(testTxOwner, otherAddr, coin(assettypes.UusdcDenom, 2_500_000))
+		out, err := extractBankSends(txRawWith(t, m1, m2), reg, testTxOwner)
+		require.NoError(t, err)
+		require.Equal(t, "3500000", out["usdc"].String())
+	})
+
+	t.Run("send from a different address is ignored", func(t *testing.T) {
+		msg := send(otherAddr, testTxOwner, coin(assettypes.UusdcDenom, 9_000_000))
+		out, err := extractBankSends(txRawWith(t, msg), reg, testTxOwner)
+		require.NoError(t, err)
+		require.Empty(t, out)
+	})
+
+	t.Run("unknown denom is uncapped (ignored)", func(t *testing.T) {
+		msg := send(testTxOwner, otherAddr, coin("ufoo", 5))
+		out, err := extractBankSends(txRawWith(t, msg), reg, testTxOwner)
+		require.NoError(t, err)
+		require.Empty(t, out)
+	})
+
+	t.Run("malformed bytes — error not panic", func(t *testing.T) {
+		_, err := extractBankSends([]byte{0xff, 0xff}, reg, testTxOwner)
 		require.Error(t, err)
 	})
 }

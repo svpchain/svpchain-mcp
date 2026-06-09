@@ -128,6 +128,15 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 	}
 	withdrawLedger := limits.NewMemoryLedger(limitsCfg.DailyWithdrawCapUSDC, nil)
 
+	// Per-symbol daily transfer-out cap (svp / usdc / usdv). Caps are parsed
+	// from operator symbols into base units up front so a typo'd symbol or
+	// amount fails startup rather than silently disabling a rail. The ledger
+	// is shared by both the x/bank and EVM rails.
+	// Transfer-out caps are fully agent-controlled: the store starts empty
+	// (every symbol unlimited) and each tenant sets its own per-symbol cap at
+	// runtime via set_transfer_out_cap. Enforced on both the bank and EVM rails.
+	transferOut := limits.NewMemoryTransferOutStore(nil)
+
 	// v0.3 self-service auth state. Both stores are in-memory + TTL-
 	// bounded; the durable backend lands alongside the durable withdraw
 	// ledger. Auto-issued tenants inherit a fixed allowlist of subaccount
@@ -156,6 +165,7 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 		RateLimit:         policy.NewRateLimiter(0, 0),
 		Limits:            limitsCfg,
 		WithdrawLedger:    withdrawLedger,
+		TransferOut:       transferOut,
 		NonceStore:        nonceStore,
 		DynamicTenants:    dynamicTenants,
 		IPChallengeLimit:  ipLimit,

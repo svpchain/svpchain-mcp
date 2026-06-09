@@ -183,6 +183,16 @@ func Register(srv *mcp.Server, h *Handlers) {
 		Description: "Construct a native bank send (cosmos x/bank MsgSend) of any denom from the owner's wallet to an arbitrary recipient address — e.g. send SVP (denom \"asvp\") or USDC (\"erc20/usdc\") to a third party. Amount is human units for known denoms (SVP, USDC) or base units otherwise. Returns a TxPayload — pass to sign_transaction (local signer) then broadcast_signed_tx to land on chain.",
 	}, h.BuildBankSend)
 
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_transfer_out_cap",
+		Description: "Read the authenticated user's daily transfer-out caps (svp / usdc / usdv): each symbol's effective cap, amount already moved out this UTC day, and remaining headroom. The cap sums outflow across both rails (bank sends and EVM transfers). \"unlimited\" means no cap.",
+	}, h.GetTransferOutCap)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "set_transfer_out_cap",
+		Description: "Set the authenticated user's own daily transfer-out cap for a token symbol (svp / usdc / usdv), in human units (\"500\", \"1.5\"); \"0\" means unlimited. This is a per-user self-limit on funds leaving the wallet (bank sends + EVM transfers) per UTC day — there is no operator ceiling, so it bounds honest mistakes but is not a hard guard against a misused agent. Resets at restart / UTC midnight.",
+	}, h.SetTransferOutCap)
+
 	// E. Cross-cutting.
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "broadcast_signed_tx",

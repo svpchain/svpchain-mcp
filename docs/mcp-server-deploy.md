@@ -99,6 +99,35 @@ only for ARM hosts.
   --daily-withdraw-cap-usdc` — emitted into the `[limits]` block. Omit
   to use server defaults.
 
+## Daily "transfer out" cap (`set_/get_transfer_out_cap`)
+
+Caps how much of each token a tenant may move OUT of its wallet per UTC
+day. Unlike the USDC withdraw caps above, it is keyed by end-user token
+symbol and the total sums a symbol's outflow across **both** rails it can
+leave through — `build_bank_send` (x/bank) and `broadcast_evm_tx` (ERC-20
+`transfer`/`transferFrom`, and native-SVP value sends). So a `usdc` bank
+send and a `usdc` ERC-20 transfer draw down one shared daily total. Swaps
+are intentionally **not** counted.
+
+There is **no operator config**: caps are set entirely by the
+authenticated user at runtime via two MCP tools. Every symbol starts
+**unlimited** until the user opts into a cap.
+
+- `get_transfer_out_cap` — returns each symbol's effective cap, the amount
+  moved out so far this UTC day, and the remaining headroom.
+- `set_transfer_out_cap(symbol, amount)` — sets that user's own cap for a
+  symbol in whole-token human units (`"500"`, `"1.5"`); `"0"` means
+  unlimited. Known symbols are `svp`, `usdc`, `usdv`.
+
+Because the cap is **fully agent-controlled with no operator ceiling**, it
+bounds an *honest* agent's blast radius (a runaway loop, an over-eager
+transfer) but is **not** a hard guard against a compromised or
+prompt-injected agent, which could call `set_transfer_out_cap` to lift its
+own limit before draining. If you need a boundary an agent cannot cross,
+do not enable the transfer tools (`build_bank_send`, `broadcast_evm_tx`)
+for that tenant. Caps and usage are per-tenant, in-memory, and reset on
+restart / at UTC midnight.
+
 ## Redeploy after a rebuild
 
 Just rerun the same command. `save_if_changed` and `load_if_missing`

@@ -92,6 +92,32 @@ Silicon（arm64）而远端是 Linux amd64。仅在远端是 ARM 时用
   --daily-withdraw-cap-usdc` — 写入 `[limits]` 块；省略则使用 server
   端默认值。
 
+## 每日转出上限（`set_/get_transfer_out_cap`）
+
+限制每个 tenant 每个 UTC 日可以从钱包**转出**的各币种数量。与上面的
+USDC withdraw 上限不同，它以终端用户熟悉的 token symbol 为 key，并且把
+一个 symbol 在**两条 rail** 上的转出量合并计算 —— `build_bank_send`
+（x/bank）和 `broadcast_evm_tx`（ERC-20 `transfer`/`transferFrom`，以及
+native SVP 的 value 转账）。因此 `usdc` 走 bank send 和走 ERC-20
+transfer 共用同一个每日额度。swap 不计入。
+
+**没有 operator 配置**：上限完全由已认证用户在运行时通过两个 MCP 工具
+设置。每个 symbol 默认 **unlimited**，直到用户主动设定上限。
+
+- `get_transfer_out_cap` —— 返回每个 symbol 的有效上限、当前 UTC 日已
+  转出量、以及剩余额度。
+- `set_transfer_out_cap(symbol, amount)` —— 设置该用户*自己*某个 symbol
+  的上限，单位为整 token 的 human 值（`"500"`、`"1.5"`）；`"0"` 表示
+  unlimited。已知 symbol 为 `svp`、`usdc`、`usdv`。
+
+由于该上限**完全由 agent 控制、没有 operator 上限**，它只能限制*诚实*
+agent 的影响范围（失控循环、过于激进的转账），并**不是**针对被攻破 /
+prompt injection 的 agent 的硬防护 —— 这类 agent 可以先调用
+`set_transfer_out_cap` 抬高自己的上限再转空。如果需要 agent 无法越过的
+边界，就不要为该 tenant 启用转出工具（`build_bank_send`、
+`broadcast_evm_tx`）。上限与用量按 tenant 隔离，在内存中，重启 /
+UTC 跨日时重置。
+
 ## 重新部署
 
 重复执行同一条命令即可。`save_if_changed` 和 `load_if_missing` 在
