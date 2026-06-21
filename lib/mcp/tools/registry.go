@@ -269,4 +269,44 @@ func registerEVMTools(srv *mcp.Server, h *Handlers) {
 		Name:        "build_swap",
 		Description: "Construct an exact-input UniswapV2 swap of amount_in (human units) token_in -> token_out, output to your own address. Re-quotes and applies slippage_bps (default 50 = 0.5%) to set the on-chain minimum, and for token-input swaps checks the router allowance first (returns an \"approve first\" error pointing at build_token_approval if missing). Use empty/\"native\"/\"svp\" for the native SVP side. Returns an EVMTxPayload — pass to sign_evm_transaction then broadcast_evm_tx.",
 	}, h.BuildSwap)
+
+	// Generic ERC-20 / ERC-721 build_* family — transfer / approve on any token
+	// contract. Like the swap tools they return an EVMTxPayload (sign with
+	// sign_evm_transaction, then broadcast_evm_tx). ERC-20 amounts are human
+	// units (converted via the token's on-chain decimals); ERC-721 token ids are
+	// bare integers. The daily transfer-out cap is enforced at broadcast_evm_tx.
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_erc20_transfer",
+		Description: "Construct an ERC-20 transfer(to, amount) tx to send tokens from your wallet to a recipient. token is the 0x token contract; amount is human units (e.g. \"1.5\"), converted via the token's on-chain decimals. Returns an EVMTxPayload — pass to sign_evm_transaction (local signer) then broadcast_evm_tx.",
+	}, h.BuildERC20Transfer)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_erc20_approve",
+		Description: "Construct an ERC-20 approve(spender, amount) tx authorizing a spender to pull your tokens. amount is human units; pass unlimited=true for the max (2^256-1). Returns an EVMTxPayload — pass to sign_evm_transaction then broadcast_evm_tx.",
+	}, h.BuildERC20Approve)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_erc20_transfer_from",
+		Description: "Construct an ERC-20 transferFrom(from, to, amount) tx — pull tokens from an owner that previously approved you. amount is human units. Returns an EVMTxPayload — pass to sign_evm_transaction then broadcast_evm_tx.",
+	}, h.BuildERC20TransferFrom)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_erc721_transfer_from",
+		Description: "Construct an ERC-721 transferFrom(from, to, tokenId) tx to move one NFT. Prefer build_erc721_safe_transfer_from when the recipient is a contract. Returns an EVMTxPayload — pass to sign_evm_transaction then broadcast_evm_tx.",
+	}, h.BuildERC721TransferFrom)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_erc721_safe_transfer_from",
+		Description: "Construct the 3-arg ERC-721 safeTransferFrom(from, to, tokenId) tx to move one NFT (verifies a contract recipient can receive ERC-721). Returns an EVMTxPayload — pass to sign_evm_transaction then broadcast_evm_tx.",
+	}, h.BuildERC721SafeTransferFrom)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_erc721_approve",
+		Description: "Construct an ERC-721 approve(spender, tokenId) tx granting control of ONE NFT to spender (pass the zero address to clear). Returns an EVMTxPayload — pass to sign_evm_transaction then broadcast_evm_tx.",
+	}, h.BuildERC721Approve)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_erc721_set_approval_for_all",
+		Description: "Construct an ERC-721 setApprovalForAll(operator, approved) tx to grant (approved=true) or revoke (approved=false) operator control of your ENTIRE NFT collection in this contract. Returns an EVMTxPayload — pass to sign_evm_transaction then broadcast_evm_tx.",
+	}, h.BuildERC721SetApprovalForAll)
 }
