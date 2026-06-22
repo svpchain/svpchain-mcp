@@ -203,5 +203,7 @@ an immediately-filled order, depending on the book).
   `localsvp-1`. Confirm with `svpchaind status | jq .node_info.network`
   and update `/tmp/mcp.toml`.
 - **Indexer not running** → `get_market` / `get_orderbook` /
-  `get_subaccount` will fail. The chain-side reads (`get_live_subaccount`,
-  `get_oracle_price`) work without the indexer.
+  `get_subaccount` will fail. The chain-side read `get_live_subaccount`
+  works without the indexer; `get_oracle_price` reads the EVM oracle feed
+  over `evm_rpc_url` (also independent of the indexer, but needs EVM RPC +
+  `evm_oracle_addr` configured).

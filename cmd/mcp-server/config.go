@@ -39,6 +39,14 @@ type Config struct {
 	EVMUniswapRouterAddr string `toml:"evm_uniswap_router_addr"`
 	EVMWSVPAddr          string `toml:"evm_wsvp_addr"`
 
+	// EVMOracleAddr binds get_oracle_price to an OffChainAggregator price-feed
+	// deployment (a Chainlink AggregatorV3-style contract read via eth_call).
+	// Independent of the swap addresses — it is a standalone read feed, not
+	// both-or-neither with anything. Optional and must be a valid 0x address
+	// when set; setting it also requires evm_rpc_url. When unset, get_oracle_price
+	// refuses and the rest of the EVM family is unaffected.
+	EVMOracleAddr string `toml:"evm_oracle_addr"`
+
 	// FaucetBaseURL is the faucet backend's HTTP base URL (e.g.
 	// "https://pre-faucet.svpchain.org"). Optional: when empty the faucet
 	// tools (faucet_claim / list_faucet_tokens) refuse. The faucet runs its
@@ -144,6 +152,25 @@ func (c *Config) Validate() error {
 	}
 	if err := c.validateSwap(); err != nil {
 		return err
+	}
+	if err := c.validateOracle(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateOracle enforces the oracle-feed invariants: when set it must be a
+// valid 0x address and requires an EVM RPC endpoint (get_oracle_price reads it
+// via eth_call). Independent of the swap addresses.
+func (c *Config) validateOracle() error {
+	if c.EVMOracleAddr == "" {
+		return nil
+	}
+	if !common.IsHexAddress(c.EVMOracleAddr) {
+		return fmt.Errorf("evm_oracle_addr %q is not a valid 0x address", c.EVMOracleAddr)
+	}
+	if c.EVMRPCURL == "" {
+		return fmt.Errorf("evm_rpc_url is required when evm_oracle_addr is set")
 	}
 	return nil
 }

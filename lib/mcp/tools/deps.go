@@ -20,7 +20,6 @@ type ChainDeps struct {
 	Broadcast       chain.BroadcastClient
 	ClobQuery       chain.ClobQueryClient
 	SubaccountQuery chain.SubaccountQueryClient
-	PricesQuery     chain.PricesQueryClient
 	BankQuery       chain.BankQueryClient
 	CometBft        chain.CometBftClient
 
@@ -42,6 +41,11 @@ type EVMDeps struct {
 	// evm_uniswap_router_addr and evm_wsvp_addr are configured (which also requires
 	// evm_rpc_url); the swap tools check it and refuse otherwise.
 	Uniswap *builder.UniswapV2
+
+	// Oracle binds get_oracle_price to an OffChainAggregator price feed
+	// deployment. Nil unless evm_oracle_addr is configured (which also requires
+	// evm_rpc_url); get_oracle_price checks it and refuses otherwise.
+	Oracle *builder.OracleFeed
 }
 
 // Deps is the full dependency bundle every tool handler receives. v0.1

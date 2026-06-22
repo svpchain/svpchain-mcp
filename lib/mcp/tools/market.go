@@ -2,10 +2,12 @@ package tools
 
 import (
 	"context"
+	"fmt"
 
+	"cosmossdk.io/math"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	pricestypes "github.com/dydxprotocol/v4-chain/protocol/x/prices/types"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
 )
 
@@ -83,37 +85,97 @@ func (h *Handlers) GetOrderbook(
 
 // -- get_oracle_price ---------------------------------------------------
 
-type GetOraclePriceInput struct {
-	MarketID uint32 `json:"market_id" jsonschema:"prices module market id"`
+// requireOracle returns the bound price feed, or a clean user error if the
+// server was started without the EVM RPC + evm_oracle_addr config the
+// get_oracle_price tool needs. Modeled on requireSwap (swap.go).
+func (h *Handlers) requireOracle() (*builder.OracleFeed, error) {
+	if h.Deps.Chain.EVM == nil {
+		return nil, userErrf("EVM is not enabled on this server (no evm_rpc_url configured)")
+	}
+	if h.Deps.EVM.Oracle == nil {
+		return nil, userErrf("oracle price feed is not enabled on this server (no evm_oracle_addr configured)")
+	}
+	return h.Deps.EVM.Oracle, nil
 }
 
-// GetOraclePriceOutput surfaces the on-chain oracle price as both the raw
-// (price * 10^exponent) form and as a derived float string.
+type GetOraclePriceInput struct{}
+
+// GetOraclePriceOutput surfaces the EVM aggregator's latest price as both a
+// decimal-adjusted human string and the raw int256, plus the feed metadata
+// needed to interpret it.
 type GetOraclePriceOutput struct {
-	MarketID uint32 `json:"market_id"`
-	Price    uint64 `json:"price"`
-	Exponent int32  `json:"exponent"`
+	Oracle      string `json:"oracle"`       // 0x aggregator address read
+	Description string `json:"description"`  // feed label, e.g. "BTC / USD"
+	Decimals    int64  `json:"decimals"`     // feed decimals
+	Price       string `json:"price"`        // decimal-adjusted answer
+	PriceRaw    string `json:"price_raw"`    // raw int256 answer (base units)
+	RoundID     string `json:"round_id"`     // latest round id
+	UpdatedAt   int64  `json:"updated_at"`   // unix seconds the round was last updated
 }
 
+// GetOraclePrice reads the configured OffChainAggregator price feed via
+// read-only eth_calls (description, decimals, latestRoundData) and returns the
+// latest price. Read-only — no tx, no signing.
 func (h *Handlers) GetOraclePrice(
 	ctx context.Context,
 	_ *mcp.CallToolRequest,
-	in GetOraclePriceInput,
+	_ GetOraclePriceInput,
 ) (*mcp.CallToolResult, GetOraclePriceOutput, error) {
 	if _, err := h.authorize(ctx, "get_oracle_price"); err != nil {
 		return nil, GetOraclePriceOutput{}, err
 	}
-	mp, err := h.Deps.Chain.PricesQuery.MarketPrice(ctx, in.MarketID)
+	oracle, err := h.requireOracle()
 	if err != nil {
 		return nil, GetOraclePriceOutput{}, err
 	}
+	feed := oracle.Address()
+
+	descData, err := oracle.PackDescription()
+	if err != nil {
+		return nil, GetOraclePriceOutput{}, err
+	}
+	descOut, err := h.evmCall(ctx, feed, descData)
+	if err != nil {
+		return nil, GetOraclePriceOutput{}, fmt.Errorf("read description for %s (is it an aggregator?): %w", feed.Hex(), err)
+	}
+	desc, err := oracle.UnpackDescription(descOut)
+	if err != nil {
+		return nil, GetOraclePriceOutput{}, err
+	}
+
+	decData, err := oracle.PackDecimals()
+	if err != nil {
+		return nil, GetOraclePriceOutput{}, err
+	}
+	decOut, err := h.evmCall(ctx, feed, decData)
+	if err != nil {
+		return nil, GetOraclePriceOutput{}, fmt.Errorf("read decimals for %s: %w", feed.Hex(), err)
+	}
+	dec, err := oracle.UnpackDecimals(decOut)
+	if err != nil {
+		return nil, GetOraclePriceOutput{}, err
+	}
+
+	rdData, err := oracle.PackLatestRoundData()
+	if err != nil {
+		return nil, GetOraclePriceOutput{}, err
+	}
+	rdOut, err := h.evmCall(ctx, feed, rdData)
+	if err != nil {
+		return nil, GetOraclePriceOutput{}, fmt.Errorf("read latestRoundData for %s: %w", feed.Hex(), err)
+	}
+	rd, err := oracle.UnpackLatestRoundData(rdOut)
+	if err != nil {
+		return nil, GetOraclePriceOutput{}, err
+	}
+
 	return nil, GetOraclePriceOutput{
-		MarketID: mp.Id,
-		Price:    mp.Price,
-		Exponent: mp.Exponent,
+		Oracle:      feed.Hex(),
+		Description: desc,
+		Decimals:    int64(dec),
+		Price:       humanAmount(math.NewIntFromBigInt(rd.Answer), int64(dec)),
+		PriceRaw:    rd.Answer.String(),
+		RoundID:     rd.RoundID.String(),
+		UpdatedAt:   rd.UpdatedAt.Int64(),
 	}, nil
 }
-
-// reference pricestypes import (kept for clarity; the type is used via
-// the typed PricesQueryClient).
-var _ = pricestypes.MarketPrice{}

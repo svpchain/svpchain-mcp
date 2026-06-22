@@ -39,7 +39,7 @@ func Register(srv *mcp.Server, h *Handlers) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "get_oracle_price",
-		Description: "Fetch the on-chain oracle price for a market by its prices-module id.",
+		Description: "Fetch the latest price from the configured EVM oracle feed (an OffChainAggregator / Chainlink AggregatorV3-style contract) via read-only eth_call. Returns the decimal-adjusted price plus the feed's description, decimals, round id, and last-updated time. Requires evm_rpc_url + evm_oracle_addr; refuses otherwise.",
 	}, h.GetOraclePrice)
 
 	// v0.2.1 market-data extensions.

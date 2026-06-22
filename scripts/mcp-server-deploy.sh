@@ -52,6 +52,12 @@
 #                                  set together with --evm-uniswap-router.
 #                                  Defaults to the known deployment
 #                                  (0x771a0a63…6531). SVPCHAIN_EVM_WSVP
+#   --evm-oracle <0xaddr>          OffChainAggregator price-feed address,
+#                                  enabling get_oracle_price. Requires --evm-rpc
+#                                  (standalone; independent of the swap addrs).
+#                                  Defaults to the known deployment
+#                                  (0xAE351F2d…0B56); set "" to disable.
+#                                  SVPCHAIN_EVM_ORACLE
 #   --install-dir <path>           Default ~/svpchain-mcp on remote (a
 #                                  leading ~ expands to the ssh user's $HOME).
 #   --image-tag <tag>              Default <git-short-sha>.
@@ -106,6 +112,7 @@ evm_rpc="${SVPCHAIN_EVM_RPC:-http://127.0.0.1:8545}"
 faucet_url="${SVPCHAIN_FAUCET_URL:-https://pre-faucet.svpchain.org}"
 evm_uniswap_router="${SVPCHAIN_EVM_UNISWAP_ROUTER:-0xFe7bf2DFd5CB268C6779f1F614638a436Cb701e4}"
 evm_wsvp="${SVPCHAIN_EVM_WSVP:-0x771a0a63D8198b7dbea4a16910ff68AB38006531}"
+evm_oracle="${SVPCHAIN_EVM_ORACLE:-0xAE351F2dF66DF1A7d2eB0D7574BcDb909E680B56}"
 install_dir="~/svpchain-mcp"
 image_tag=""
 platform="linux/amd64"
@@ -130,6 +137,7 @@ while [[ $# -gt 0 ]]; do
     --faucet-url)             faucet_url="$2";        shift 2 ;;
     --evm-uniswap-router)     evm_uniswap_router="$2"; shift 2 ;;
     --evm-wsvp)               evm_wsvp="$2";          shift 2 ;;
+    --evm-oracle)             evm_oracle="$2";        shift 2 ;;
     --install-dir)            install_dir="$2";       shift 2 ;;
     --image-tag)              image_tag="$2";         shift 2 ;;
     --platform)               platform="$2";          shift 2 ;;
@@ -173,13 +181,15 @@ indexer_base_url = "${indexer}"
 listen_addr      = "0.0.0.0:${listen_port}"
 broadcast_mode   = "server"
 EOF
-  # evm_rpc_url, faucet_base_url, and the swap addresses are top-level keys, so
-  # they must precede any [table] header. evm_uniswap_router_addr / evm_wsvp_addr
-  # are both-or-neither and require evm_rpc_url (config.go::validateSwap).
+  # evm_rpc_url, faucet_base_url, the swap addresses, and evm_oracle_addr are
+  # top-level keys, so they must precede any [table] header. evm_uniswap_router_addr
+  # / evm_wsvp_addr are both-or-neither (config.go::validateSwap); evm_oracle_addr
+  # is standalone. All three require evm_rpc_url (config.go::validateOracle).
   [[ -n "$evm_rpc" ]]            && echo "evm_rpc_url             = \"${evm_rpc}\""
   [[ -n "$faucet_url" ]]         && echo "faucet_base_url         = \"${faucet_url}\""
   [[ -n "$evm_uniswap_router" ]] && echo "evm_uniswap_router_addr = \"${evm_uniswap_router}\""
   [[ -n "$evm_wsvp" ]]           && echo "evm_wsvp_addr           = \"${evm_wsvp}\""
+  [[ -n "$evm_oracle" ]]         && echo "evm_oracle_addr         = \"${evm_oracle}\""
   cat <<EOF
 
 [cache]

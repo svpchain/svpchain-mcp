@@ -60,7 +60,6 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 		Broadcast:       chain.NewBroadcastClient(grpcConn),
 		ClobQuery:       chain.NewClobQueryClient(grpcConn),
 		SubaccountQuery: chain.NewSubaccountQueryClient(grpcConn),
-		PricesQuery:     chain.NewPricesQueryClient(grpcConn),
 		BankQuery:       chain.NewBankQueryClient(grpcConn),
 	}
 	cometClient, err := chain.NewCometBftClient(cfg.CometRPCURL)
@@ -97,6 +96,17 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 				return nil, fmt.Errorf("uniswap binding: %w", err)
 			}
 			evmDeps.Uniswap = uni
+		}
+		// The oracle feed is wired independently of the swap binding: it only
+		// needs evm_oracle_addr (config validation guarantees valid hex +
+		// evm_rpc_url). Without it Oracle stays nil and get_oracle_price refuses.
+		if cfg.EVMOracleAddr != "" {
+			oracle, err := builder.NewOracleFeed(common.HexToAddress(cfg.EVMOracleAddr))
+			if err != nil {
+				grpcConn.Close()
+				return nil, fmt.Errorf("oracle feed binding: %w", err)
+			}
+			evmDeps.Oracle = oracle
 		}
 	}
 

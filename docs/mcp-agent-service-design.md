@@ -81,7 +81,7 @@
 | `get_trades` | `ticker`,`limit` | `GET /v4/trades/perpetualMarket/:ticker`（`trades-controller.ts:43,45`） |
 | `get_sparklines` | `timePeriod` | `GET /v4/sparklines`（`sparklines-controller.ts:32,34`） |
 | `get_historical_funding` | `ticker` | `GET /v4/historicalFunding/:ticker`（`historical-funding-controller.ts:40,42`） |
-| `get_oracle_price` | `marketId`（实时） | 链 `prices.Query/MarketPrice`（`prices/query.proto:15`）/ `AllMarketPrices`（`:20`） |
+| `get_oracle_price` | —（读取配置的 feed） | EVM `eth_call` 读取 OffChainAggregator（Chainlink AggregatorV3 风格）合约：`description()` / `decimals()` / `latestRoundData()`；地址来自 `evm_oracle_addr` |
 | `get_height` / `get_time` | — | `GET /v4/height`（`height-controller.ts:17,19`）、`GET /v4/time`（`time-controller.ts:16,18`） |
 | `subscribe_market_data`（可选，仅 HTTP 传输） | `channel`,`ticker` | Socks `v4_orderbook`/`v4_trades`/`v4_candles`/`v4_markets`（`socks/.../types.ts:19-27`） |
 
