@@ -401,10 +401,11 @@ pass "bearer obtained (24h TTL); session is bound for subsequent calls"
 
 # Expected tool count tracks the registry (lib/mcp/tools/registry.go). v0.1 = 10,
 # v0.2.1 = 23, v0.2.2 = 27, v0.2.3 = 30 (funds tools + dual-enforcement broadcast),
-# v0.3 = 32 (+ auth_challenge + auth_verify); + get_balance + build_bank_send = 34;
-# + faucet (list_faucet_tokens, faucet_claim) = 36; + EVM engine & UniswapV2
-# (broadcast_evm_tx, evm_tx_status, quote_swap, build_token_approval, build_swap) = 41.
-EXPECTED_TOOLS="${EXPECTED_TOOLS:-41}"
+# Total registered tools — must match the mcp.AddTool count in
+# lib/mcp/tools/registry.go. Current tail: market data + account + trading +
+# funds + caps + auth + faucet + the EVM family (engine, UniswapV2 swaps, generic
+# ERC-20/ERC-721 builds, and SVPBridge build_bridge_deposit).
+EXPECTED_TOOLS="${EXPECTED_TOOLS:-51}"
 step "tools/list (expecting ${EXPECTED_TOOLS} tools)"
 LIST=$(mcp_call 1 "tools/list")
 COUNT=$(jq -r '.result.tools | length' <<<"$LIST")

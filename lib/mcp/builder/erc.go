@@ -23,11 +23,15 @@ import (
 
 // ercTransferERC20ABI is the slice of ERC-20 the transfer/approve build tools
 // need: the two write methods plus decimals() to convert human amounts at the
-// boundary (matching build_swap / build_token_approval).
+// boundary (matching build_swap / build_token_approval), and allowance() so a
+// build tool that pulls via transferFrom (e.g. build_bridge_deposit) can verify
+// the spender is already approved before building a tx that would otherwise
+// revert.
 const ercTransferERC20ABI = `[
   {"name":"transfer","type":"function","stateMutability":"nonpayable","inputs":[{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]},
   {"name":"transferFrom","type":"function","stateMutability":"nonpayable","inputs":[{"name":"from","type":"address"},{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]},
   {"name":"approve","type":"function","stateMutability":"nonpayable","inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]},
+  {"name":"allowance","type":"function","stateMutability":"view","inputs":[{"name":"owner","type":"address"},{"name":"spender","type":"address"}],"outputs":[{"name":"","type":"uint256"}]},
   {"name":"decimals","type":"function","stateMutability":"view","inputs":[],"outputs":[{"name":"","type":"uint8"}]}
 ]`
 
@@ -74,6 +78,26 @@ func PackERC20Approve(spender common.Address, amount *big.Int) ([]byte, error) {
 // base units.
 func PackERC20TransferFrom(from, to common.Address, amount *big.Int) ([]byte, error) {
 	return ercERC20ABI.Pack("transferFrom", from, to, amount)
+}
+
+// PackERC20Allowance encodes the allowance(owner, spender) getter for an
+// eth_call. Used to check a spender's remaining approval before building a
+// transferFrom-style tx (cf. build_bridge_deposit).
+func PackERC20Allowance(owner, spender common.Address) ([]byte, error) {
+	return ercERC20ABI.Pack("allowance", owner, spender)
+}
+
+// UnpackERC20Allowance decodes the uint256 returned by allowance().
+func UnpackERC20Allowance(data []byte) (*big.Int, error) {
+	out, err := ercERC20ABI.Unpack("allowance", data)
+	if err != nil {
+		return nil, fmt.Errorf("decode allowance: %w", err)
+	}
+	v, ok := out[0].(*big.Int)
+	if !ok {
+		return nil, fmt.Errorf("allowance returned an unexpected shape")
+	}
+	return v, nil
 }
 
 // PackERC20Decimals encodes the decimals() getter for an eth_call.

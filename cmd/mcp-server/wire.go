@@ -11,6 +11,7 @@ import (
 
 	"github.com/dydxprotocol/v4-chain/protocol/app"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/bridge"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/faucet"
@@ -107,6 +108,30 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 				return nil, fmt.Errorf("oracle feed binding: %w", err)
 			}
 			evmDeps.Oracle = oracle
+		}
+		// The bridge is wired only when its address, route file, and source chain
+		// id are configured (config validation guarantees all-or-nothing + valid
+		// hex). Without them Bridge/BridgeRoutes stay nil and build_bridge_deposit
+		// refuses.
+		if cfg.EVMBridgeAddr != "" {
+			br, err := builder.NewBridge(common.HexToAddress(cfg.EVMBridgeAddr))
+			if err != nil {
+				grpcConn.Close()
+				return nil, fmt.Errorf("bridge binding: %w", err)
+			}
+			routes, err := bridge.LoadRegistry(cfg.EVMBridgeRoutesPath)
+			if err != nil {
+				grpcConn.Close()
+				return nil, fmt.Errorf("bridge routes: %w", err)
+			}
+			if !routes.HasSource(cfg.EVMBridgeSourceChainID) {
+				grpcConn.Close()
+				return nil, fmt.Errorf("bridge routes %s has no routes originating from evm_bridge_source_chain_id %d",
+					cfg.EVMBridgeRoutesPath, cfg.EVMBridgeSourceChainID)
+			}
+			evmDeps.Bridge = br
+			evmDeps.BridgeRoutes = routes
+			evmDeps.BridgeSourceChainID = cfg.EVMBridgeSourceChainID
 		}
 	}
 

@@ -270,6 +270,15 @@ func registerEVMTools(srv *mcp.Server, h *Handlers) {
 		Description: "Construct an exact-input UniswapV2 swap of amount_in (human units) token_in -> token_out, output to your own address. Re-quotes and applies slippage_bps (default 50 = 0.5%) to set the on-chain minimum, and for token-input swaps checks the router allowance first (returns an \"approve first\" error pointing at build_token_approval if missing). Use empty/\"native\"/\"svp\" for the native SVP side. Returns an EVMTxPayload — pass to sign_evm_transaction then broadcast_evm_tx.",
 	}, h.BuildSwap)
 
+	// SVPBridge cross-chain deposit — bridge tokens OFF svpchain to another
+	// network. Routing (which destination token a source token maps to) comes
+	// from the operator's route registry; native SVP rides as the tx value,
+	// ERC-20s go through deposit() and need a prior approval to the bridge.
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_bridge_deposit",
+		Description: "Construct an SVPBridge deposit that bridges a token from svpchain to another network (e.g. Sepolia, Arbitrum Sepolia). dest_chain is a chain name (\"sepolia\", \"arbitrum_sepolia\") or numeric EVM chain id; token is a known symbol (\"USDC\", \"WETH\"), a 0x source-token address, or empty/\"native\"/\"svp\" for native SVP; amount is human units; recipient defaults to your own address on the destination chain. The (token, dest_chain) pair is validated against the configured route whitelist. For ERC-20 tokens the bridge must be approved first (returns an \"approve first\" error pointing at build_erc20_approve with spender=the bridge if missing); native SVP needs no approval. Returns an EVMTxPayload — pass to sign_evm_transaction (local signer) then broadcast_evm_tx. Requires evm_rpc_url + evm_bridge_addr + evm_bridge_routes_path; refuses otherwise.",
+	}, h.BuildBridgeDeposit)
+
 	// Generic ERC-20 / ERC-721 build_* family — transfer / approve on any token
 	// contract. Like the swap tools they return an EVMTxPayload (sign with
 	// sign_evm_transaction, then broadcast_evm_tx). ERC-20 amounts are human

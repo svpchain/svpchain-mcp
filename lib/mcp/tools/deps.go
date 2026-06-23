@@ -5,6 +5,7 @@ import (
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/bridge"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/faucet"
@@ -46,6 +47,16 @@ type EVMDeps struct {
 	// deployment. Nil unless evm_oracle_addr is configured (which also requires
 	// evm_rpc_url); get_oracle_price checks it and refuses otherwise.
 	Oracle *builder.OracleFeed
+
+	// Bridge + BridgeRoutes back build_bridge_deposit: the SVPBridge contract
+	// binding and the (sourceToken, targetChainId -> targetToken) route registry.
+	// BridgeSourceChainID is the EVM chain id of this deployment, used to scope
+	// route lookups to outbound-from-svpchain pairs. All three are set together
+	// (or all nil) — guaranteed by config validation, which also requires
+	// evm_rpc_url. build_bridge_deposit checks them and refuses otherwise.
+	Bridge              *builder.Bridge
+	BridgeRoutes        *bridge.Registry
+	BridgeSourceChainID uint64
 }
 
 // Deps is the full dependency bundle every tool handler receives. v0.1

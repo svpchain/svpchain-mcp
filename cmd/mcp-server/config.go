@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"cosmossdk.io/math"
@@ -46,6 +47,19 @@ type Config struct {
 	// when set; setting it also requires evm_rpc_url. When unset, get_oracle_price
 	// refuses and the rest of the EVM family is unaffected.
 	EVMOracleAddr string `toml:"evm_oracle_addr"`
+
+	// EVMBridgeAddr / EVMBridgeRoutesPath / EVMBridgeSourceChainID bind
+	// build_bridge_deposit to an SVPBridge deployment. EVMBridgeAddr is the
+	// bridge contract on this chain (the deposit target); EVMBridgeRoutesPath is
+	// a JSON file describing the (sourceToken, targetChainId -> targetToken)
+	// routes the bridge honors; EVMBridgeSourceChainID is this deployment's EVM
+	// chain id, used to scope route lookups to outbound-from-svpchain pairs (the
+	// route file may list every direction). All three are optional but must be
+	// set together; setting any also requires evm_rpc_url. When unset the bridge
+	// tool refuses and the rest of the EVM family is unaffected.
+	EVMBridgeAddr          string `toml:"evm_bridge_addr"`
+	EVMBridgeRoutesPath    string `toml:"evm_bridge_routes_path"`
+	EVMBridgeSourceChainID uint64 `toml:"evm_bridge_source_chain_id"`
 
 	// FaucetBaseURL is the faucet backend's HTTP base URL (e.g.
 	// "https://pre-faucet.svpchain.org"). Optional: when empty the faucet
@@ -121,6 +135,14 @@ func LoadConfig(path string) (*Config, error) {
 		c.BroadcastMode = "server"
 	}
 	c.Fee.applyDefaults()
+	// A relative evm_bridge_routes_path is resolved against the config file's
+	// own directory, not the server's working directory — so the common
+	// "routes.json next to mcp.toml" layout works regardless of where
+	// mcp-server is launched from (the local checkout, a systemd unit, or the
+	// container, where both files are mounted into /etc/svpchain-mcp).
+	if c.EVMBridgeRoutesPath != "" && !filepath.IsAbs(c.EVMBridgeRoutesPath) {
+		c.EVMBridgeRoutesPath = filepath.Join(filepath.Dir(path), c.EVMBridgeRoutesPath)
+	}
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
@@ -155,6 +177,39 @@ func (c *Config) Validate() error {
 	}
 	if err := c.validateOracle(); err != nil {
 		return err
+	}
+	if err := c.validateBridge(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateBridge enforces the bridge invariants: the contract address, routes
+// path, and source chain id are all-or-nothing; the address must be valid hex
+// when set; and the family requires an EVM RPC endpoint (deposits go out over
+// eth_sendRawTransaction, and the allowance check reads via eth_call).
+func (c *Config) validateBridge() error {
+	set := 0
+	if c.EVMBridgeAddr != "" {
+		set++
+	}
+	if c.EVMBridgeRoutesPath != "" {
+		set++
+	}
+	if c.EVMBridgeSourceChainID != 0 {
+		set++
+	}
+	if set == 0 {
+		return nil
+	}
+	if set != 3 {
+		return fmt.Errorf("evm_bridge_addr, evm_bridge_routes_path and evm_bridge_source_chain_id must be set together")
+	}
+	if !common.IsHexAddress(c.EVMBridgeAddr) {
+		return fmt.Errorf("evm_bridge_addr %q is not a valid 0x address", c.EVMBridgeAddr)
+	}
+	if c.EVMRPCURL == "" {
+		return fmt.Errorf("evm_rpc_url is required when the bridge is configured")
 	}
 	return nil
 }

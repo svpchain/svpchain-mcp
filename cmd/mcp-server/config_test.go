@@ -220,6 +220,88 @@ func TestLoadConfig_OracleAddress(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_BridgeAddresses(t *testing.T) {
+	addr := "0x78Aca10afd5b28E838ECf0De20c5621CE39D9F4a"
+	routes := "/tmp/routes.json"
+
+	// Top-level keys — must precede the [cache]/[limits] table headers.
+	withTop := func(extra string) string { return extra + validConfigTOML }
+	allThree := "evm_rpc_url = \"http://127.0.0.1:8545\"\n" +
+		"evm_bridge_addr = \"" + addr + "\"\n" +
+		"evm_bridge_routes_path = \"" + routes + "\"\n" +
+		"evm_bridge_source_chain_id = 2517\n"
+
+	t.Run("all three set with evm_rpc_url", func(t *testing.T) {
+		cfg, err := LoadConfig(writeTempConfig(t, withTop(allThree)))
+		require.NoError(t, err)
+		require.Equal(t, addr, cfg.EVMBridgeAddr)
+		require.Equal(t, routes, cfg.EVMBridgeRoutesPath)
+		require.EqualValues(t, 2517, cfg.EVMBridgeSourceChainID)
+	})
+
+	t.Run("none set is fine", func(t *testing.T) {
+		_, err := LoadConfig(writeTempConfig(t, validConfigTOML))
+		require.NoError(t, err)
+	})
+
+	cases := []struct {
+		name        string
+		extra       string
+		expectError string
+	}{
+		{
+			"addr without routes/source",
+			"evm_rpc_url = \"http://127.0.0.1:8545\"\nevm_bridge_addr = \"" + addr + "\"\n",
+			"must be set together",
+		},
+		{
+			"routes/source without addr",
+			"evm_rpc_url = \"http://127.0.0.1:8545\"\nevm_bridge_routes_path = \"" + routes + "\"\nevm_bridge_source_chain_id = 2517\n",
+			"must be set together",
+		},
+		{
+			"invalid bridge address",
+			"evm_rpc_url = \"http://127.0.0.1:8545\"\nevm_bridge_addr = \"0xnope\"\nevm_bridge_routes_path = \"" + routes + "\"\nevm_bridge_source_chain_id = 2517\n",
+			"not a valid 0x address",
+		},
+		{
+			"set without evm_rpc_url",
+			"evm_bridge_addr = \"" + addr + "\"\nevm_bridge_routes_path = \"" + routes + "\"\nevm_bridge_source_chain_id = 2517\n",
+			"evm_rpc_url is required",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadConfig(writeTempConfig(t, withTop(tc.extra)))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.expectError)
+		})
+	}
+}
+
+func TestLoadConfig_BridgeRoutesPathResolution(t *testing.T) {
+	addr := "0x78Aca10afd5b28E838ECf0De20c5621CE39D9F4a"
+	base := "evm_rpc_url = \"http://127.0.0.1:8545\"\nevm_bridge_addr = \"" + addr +
+		"\"\nevm_bridge_source_chain_id = 2517\n"
+
+	t.Run("relative resolves against config dir", func(t *testing.T) {
+		body := base + "evm_bridge_routes_path = \"routes.json\"\n" + validConfigTOML
+		p := writeTempConfig(t, body)
+		cfg, err := LoadConfig(p)
+		require.NoError(t, err)
+		require.True(t, filepath.IsAbs(cfg.EVMBridgeRoutesPath))
+		require.Equal(t, filepath.Join(filepath.Dir(p), "routes.json"), cfg.EVMBridgeRoutesPath)
+	})
+
+	t.Run("absolute left unchanged", func(t *testing.T) {
+		abs := "/etc/svpchain-mcp/routes.json"
+		body := base + "evm_bridge_routes_path = \"" + abs + "\"\n" + validConfigTOML
+		cfg, err := LoadConfig(writeTempConfig(t, body))
+		require.NoError(t, err)
+		require.Equal(t, abs, cfg.EVMBridgeRoutesPath)
+	})
+}
+
 // stripLine removes any line in body that begins (after leading whitespace)
 // with prefix — used by the rejection tests to strip a required field.
 func stripLine(body, prefix string) string {
