@@ -88,7 +88,7 @@ func (h *Handlers) BroadcastEVMTx(
 	}
 
 	// Per-symbol daily transfer-out cap (EVM rail): native-value sends and
-	// direct ERC-20 transfers accumulate against the same per-tenant ledger as
+	// direct ERC-20 transfers accumulate against the same per-owner ledger as
 	// x/bank sends, so e.g. usdc leaving via bank and via its ERC-20 share one
 	// daily total. Recorded only after a successful send, below. The router /
 	// WSVP addresses (zero when swaps are disabled) let the decoder exclude
@@ -100,7 +100,7 @@ func (h *Handlers) BroadcastEVMTx(
 	}
 	transferOut := decodeTransferOut(tx.To(), tx.Value(), tx.Data(), ownerEth, router, wsvp)
 	for sym, amt := range transferOut {
-		if err := h.Deps.TransferOut.Check(tp.TenantID, sym, amt); err != nil {
+		if err := h.Deps.TransferOut.Check(tp.Owner, sym, amt); err != nil {
 			return nil, BroadcastEVMTxOutput{}, err
 		}
 	}
@@ -128,7 +128,7 @@ func (h *Handlers) BroadcastEVMTx(
 	// Spend only after the node accepts the tx — a rejected broadcast doesn't
 	// eat the tenant's daily cap.
 	for sym, amt := range transferOut {
-		h.Deps.TransferOut.Record(tp.TenantID, sym, amt)
+		h.Deps.TransferOut.Record(tp.Owner, sym, amt)
 	}
 	return nil, BroadcastEVMTxOutput{TxHash: txHash}, nil
 }

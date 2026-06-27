@@ -9,12 +9,12 @@ import (
 )
 
 // This file is the canonical "transfer out" asset registry. Funds leave a
-// tenant's wallet through two rails — x/bank sends and EVM transfers — and a
+// wallet through two rails — x/bank sends and EVM transfers — and a
 // single end-user-facing token (e.g. usdc, which is both the x/bank denom
 // erc20/usdc and an ERC-20) can leave through either. The daily cap
-// (limits/transferout.go) is keyed by symbol, so each rail resolves its moved
-// asset back to a symbol here and accumulates against one shared per-tenant
-// total.
+// (limits/transferout.go) is keyed by owner wallet and symbol, so each rail
+// resolves its moved asset back to a symbol here and accumulates against one
+// shared per-owner total.
 //
 // Agents set caps in these symbols (svp, usdc, usdv), not raw on-chain
 // identifiers (asvp, erc20/usdc, 0x…), which end users don't recognise.

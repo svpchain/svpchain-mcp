@@ -13,12 +13,14 @@ import (
 )
 
 // These two tools let an agent read and set the per-symbol daily transfer-out
-// cap for ITS OWN authenticated tenant (svp / usdc / usdv). Caps are fully
-// agent-controlled with no operator config: every symbol starts unlimited
-// until the tenant sets one. The cap bounds an honest agent's blast radius but
-// is not a hard guardrail against a compromised one (which could raise its own
-// cap before draining). Caps and usage are in-memory and reset on restart /
-// UTC midnight.
+// cap for ITS OWN authenticated wallet (svp / usdc / usdv). Caps are keyed by
+// the owner wallet address, so all of a wallet's concurrent agents and re-auths
+// share one cap and one daily total (a fresh login can't reset the meter).
+// Caps are fully agent-controlled with no operator config: every symbol starts
+// unlimited until the owner sets one. The cap bounds an honest agent's blast
+// radius but is not a hard guardrail against a compromised one (which could
+// raise its own cap before draining). Caps and usage are in-memory and reset on
+// restart / UTC midnight.
 
 // -- set_transfer_out_cap ----------------------------------------------
 
@@ -50,14 +52,14 @@ func (h *Handlers) SetTransferOutCap(
 	// "0" means unlimited — the zero-disables convention used throughout the
 	// limits config.
 	if strings.TrimSpace(in.Amount) == "0" {
-		h.Deps.TransferOut.SetUnlimited(tp.TenantID, a.symbol)
+		h.Deps.TransferOut.SetUnlimited(tp.Owner, a.symbol)
 		return nil, SetTransferOutCapOutput{Symbol: a.symbol, Cap: "unlimited"}, nil
 	}
 	base, err := humanToBaseUnits(in.Amount, a.decimals)
 	if err != nil {
 		return nil, SetTransferOutCapOutput{}, fmt.Errorf("amount: %w", err)
 	}
-	h.Deps.TransferOut.SetCap(tp.TenantID, limits.SymbolCap{
+	h.Deps.TransferOut.SetCap(tp.Owner, limits.SymbolCap{
 		Symbol:   a.symbol,
 		Decimals: a.decimals,
 		CapBase:  base.BigInt(),
@@ -101,28 +103,28 @@ func (h *Handlers) GetTransferOutCap(
 		assets = []assetSymbol{a}
 	}
 	return nil, GetTransferOutCapOutput{
-		Caps: transferOutCapView(h.Deps.TransferOut, tp.TenantID, assets),
+		Caps: transferOutCapView(h.Deps.TransferOut, tp.Owner, assets),
 	}, nil
 }
 
-// transferOutCapView builds the per-symbol cap report for a tenant: effective
+// transferOutCapView builds the per-symbol cap report for an owner: effective
 // cap (or "unlimited"), amount already moved out today, and remaining headroom.
 // The store methods are nil-safe, so this is testable with a real store and
 // without a live handler.
 func transferOutCapView(
-	store *limits.MemoryTransferOutStore, tenantID string, assets []assetSymbol,
+	store *limits.MemoryTransferOutStore, owner string, assets []assetSymbol,
 ) []TransferOutCapDTO {
 	out := make([]TransferOutCapDTO, 0, len(assets))
 	for _, a := range assets {
 		hum := func(x *big.Int) string { return humanAmount(sdkmath.NewIntFromBigInt(x), a.decimals) }
-		used := store.Used(tenantID, a.symbol)
+		used := store.Used(owner, a.symbol)
 		dto := TransferOutCapDTO{
 			Symbol:    a.symbol,
 			UsedToday: hum(used),
 			Cap:       "unlimited",
 			Remaining: "unlimited",
 		}
-		if c, ok := store.Cap(tenantID, a.symbol); ok && c.CapBase != nil {
+		if c, ok := store.Cap(owner, a.symbol); ok && c.CapBase != nil {
 			rem := new(big.Int).Sub(c.CapBase, used)
 			if rem.Sign() < 0 {
 				rem = big.NewInt(0)

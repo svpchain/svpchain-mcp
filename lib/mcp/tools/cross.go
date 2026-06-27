@@ -84,7 +84,7 @@ func (h *Handlers) BroadcastSignedTx(
 
 	// Per-symbol daily transfer-out cap (x/bank rail). Sum the signer's own
 	// outbound MsgSend amounts by cap symbol (svp / usdc / …) and check them
-	// against the same per-tenant store the EVM rail records into — so a usdc
+	// against the same per-owner store the EVM rail records into — so a usdc
 	// bank send and a usdc ERC-20 transfer share one daily total. Recorded
 	// only after a successful broadcast, below.
 	bankOut, err := extractBankSends(rawBytes, h.Deps.InterfaceRegistry, signerAddr)
@@ -92,7 +92,7 @@ func (h *Handlers) BroadcastSignedTx(
 		return nil, BroadcastSignedTxOutput{}, fmt.Errorf("inspect tx: %w", err)
 	}
 	for sym, amt := range bankOut {
-		if err := h.Deps.TransferOut.Check(tp.TenantID, sym, amt); err != nil {
+		if err := h.Deps.TransferOut.Check(tp.Owner, sym, amt); err != nil {
 			return nil, BroadcastSignedTxOutput{}, err
 		}
 	}
@@ -132,7 +132,7 @@ func (h *Handlers) BroadcastSignedTx(
 	}
 	if res.Code == 0 {
 		for sym, amt := range bankOut {
-			h.Deps.TransferOut.Record(tp.TenantID, sym, amt)
+			h.Deps.TransferOut.Record(tp.Owner, sym, amt)
 		}
 	}
 	return nil, BroadcastSignedTxOutput{Result: payload.BroadcastResult{

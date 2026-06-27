@@ -9,10 +9,12 @@ import (
 )
 
 // This file implements the per-symbol daily "transfer out" cap (svp / usdc /
-// usdv). Funds leave a tenant's wallet through two rails — x/bank sends and EVM
+// usdv). Funds leave a wallet through two rails — x/bank sends and EVM
 // transfers — and one symbol (usdc is both an x/bank denom and an ERC-20) can
 // leave through either, so caps and usage are keyed by symbol and sum across
-// both rails. Caps are set by the tenant at runtime (set_transfer_out_cap);
+// both rails. Caps and usage are keyed by the owner wallet address (not the
+// per-auth tenant id), so all of a wallet's concurrent agents / re-auths share
+// one cap and one daily total. Caps are set at runtime (set_transfer_out_cap);
 // there is no operator config. Usage is metered per UTC day and resets at
 // midnight; caps persist until changed.
 //
@@ -45,22 +47,22 @@ func (e *ErrSymbolCapExceeded) Error() string {
 	)
 }
 
-// MemoryTransferOutStore holds each tenant's per-symbol daily caps and usage in
-// one place. Caps persist until the tenant changes them; the usage tally resets
-// at UTC midnight. Safe for concurrent use; in-memory only (state resets on
-// restart). A nil *MemoryTransferOutStore is usable and treats everything as
-// uncapped — the methods short-circuit.
+// MemoryTransferOutStore holds each owner wallet's per-symbol daily caps and
+// usage in one place. Caps persist until the owner changes them; the usage
+// tally resets at UTC midnight. Safe for concurrent use; in-memory only (state
+// resets on restart). A nil *MemoryTransferOutStore is usable and treats
+// everything as uncapped — the methods short-circuit.
 type MemoryTransferOutStore struct {
 	now func() time.Time
 
 	mu   sync.Mutex
 	day  string                          // UTC date the `used` map is valid for
-	caps map[string]map[string]SymbolCap // tenant -> symbol -> finite cap
-	used map[string]map[string]*big.Int  // tenant -> symbol -> base units today
+	caps map[string]map[string]SymbolCap // owner -> symbol -> finite cap
+	used map[string]map[string]*big.Int  // owner -> symbol -> base units today
 }
 
 // NewMemoryTransferOutStore returns an empty store (every symbol uncapped until
-// a tenant sets a cap). Pass time.Now for wall-clock; tests inject a fake clock.
+// an owner sets a cap). Pass time.Now for wall-clock; tests inject a fake clock.
 func NewMemoryTransferOutStore(now func() time.Time) *MemoryTransferOutStore {
 	if now == nil {
 		now = time.Now
@@ -72,52 +74,52 @@ func NewMemoryTransferOutStore(now func() time.Time) *MemoryTransferOutStore {
 	}
 }
 
-// SetCap sets a finite daily cap for the tenant's symbol (keyed by c.Symbol).
-func (s *MemoryTransferOutStore) SetCap(tenantID string, c SymbolCap) {
+// SetCap sets a finite daily cap for the owner's symbol (keyed by c.Symbol).
+func (s *MemoryTransferOutStore) SetCap(owner string, c SymbolCap) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	bySym := s.caps[tenantID]
+	bySym := s.caps[owner]
 	if bySym == nil {
 		bySym = map[string]SymbolCap{}
-		s.caps[tenantID] = bySym
+		s.caps[owner] = bySym
 	}
 	bySym[c.Symbol] = c
 }
 
-// SetUnlimited removes any cap for the tenant's symbol (uncapped).
-func (s *MemoryTransferOutStore) SetUnlimited(tenantID, symbol string) {
+// SetUnlimited removes any cap for the owner's symbol (uncapped).
+func (s *MemoryTransferOutStore) SetUnlimited(owner, symbol string) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.caps[tenantID], symbol)
+	delete(s.caps[owner], symbol)
 }
 
-// Cap returns the tenant's finite cap for the symbol, if one is set.
-func (s *MemoryTransferOutStore) Cap(tenantID, symbol string) (SymbolCap, bool) {
+// Cap returns the owner's finite cap for the symbol, if one is set.
+func (s *MemoryTransferOutStore) Cap(owner, symbol string) (SymbolCap, bool) {
 	if s == nil {
 		return SymbolCap{}, false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	c, ok := s.caps[tenantID][symbol]
+	c, ok := s.caps[owner][symbol]
 	return c, ok
 }
 
-// Used returns a copy of the base units the tenant has transferred out of the
+// Used returns a copy of the base units the owner has transferred out of the
 // symbol so far in the current UTC day.
-func (s *MemoryTransferOutStore) Used(tenantID, symbol string) *big.Int {
+func (s *MemoryTransferOutStore) Used(owner, symbol string) *big.Int {
 	if s == nil {
 		return big.NewInt(0)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rolloverLocked()
-	if v := s.used[tenantID][symbol]; v != nil {
+	if v := s.used[owner][symbol]; v != nil {
 		return new(big.Int).Set(v)
 	}
 	return big.NewInt(0)
@@ -125,17 +127,17 @@ func (s *MemoryTransferOutStore) Used(tenantID, symbol string) *big.Int {
 
 // Record adds to today's usage; called only after a successful broadcast so a
 // rejected tx doesn't eat the cap. Non-positive amounts are ignored.
-func (s *MemoryTransferOutStore) Record(tenantID, symbol string, amt *big.Int) {
+func (s *MemoryTransferOutStore) Record(owner, symbol string, amt *big.Int) {
 	if s == nil || amt == nil || amt.Sign() <= 0 {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rolloverLocked()
-	bySym := s.used[tenantID]
+	bySym := s.used[owner]
 	if bySym == nil {
 		bySym = map[string]*big.Int{}
-		s.used[tenantID] = bySym
+		s.used[owner] = bySym
 	}
 	cur := bySym[symbol]
 	if cur == nil {
@@ -145,21 +147,21 @@ func (s *MemoryTransferOutStore) Record(tenantID, symbol string, amt *big.Int) {
 }
 
 // Check rejects a transfer-out of amt base units of symbol when it would push
-// the tenant's running daily total past the cap. Uncapped symbols and
+// the owner's running daily total past the cap. Uncapped symbols and
 // non-positive amounts pass; a nil store passes (feature inert).
-func (s *MemoryTransferOutStore) Check(tenantID, symbol string, amt *big.Int) error {
+func (s *MemoryTransferOutStore) Check(owner, symbol string, amt *big.Int) error {
 	if s == nil || amt == nil || amt.Sign() <= 0 {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rolloverLocked()
-	c, ok := s.caps[tenantID][symbol]
+	c, ok := s.caps[owner][symbol]
 	if !ok || c.CapBase == nil {
 		return nil
 	}
 	used := big.NewInt(0)
-	if v := s.used[tenantID][symbol]; v != nil {
+	if v := s.used[owner][symbol]; v != nil {
 		used = v
 	}
 	if new(big.Int).Add(used, amt).Cmp(c.CapBase) > 0 {

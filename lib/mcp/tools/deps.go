@@ -90,12 +90,13 @@ type Deps struct {
 	Limits         limits.Config
 	WithdrawLedger limits.WithdrawLedger
 
-	// TransferOut holds each tenant's per-symbol daily "transfer out" caps and
-	// usage (svp / usdc / usdv). A symbol's outflow accumulates across both
-	// rails it can leave through — x/bank sends (build_bank_send) and EVM
-	// transfers (broadcast_evm_tx) — and is enforced at broadcast. Caps are set
-	// at runtime via set_transfer_out_cap; there is no operator config.
-	// In-memory; resets on restart / UTC midnight.
+	// TransferOut holds each owner wallet's per-symbol daily "transfer out" caps
+	// and usage (svp / usdc / usdv), keyed by owner address so all of a wallet's
+	// concurrent agents / re-auths share one cap and daily total. A symbol's
+	// outflow accumulates across both rails it can leave through — x/bank sends
+	// (build_bank_send) and EVM transfers (broadcast_evm_tx) — and is enforced
+	// at broadcast. Caps are set at runtime via set_transfer_out_cap; there is
+	// no operator config. In-memory; resets on restart / UTC midnight.
 	TransferOut *limits.MemoryTransferOutStore
 
 	// Self-service auth backend (v0.3). NonceStore + DynamicTenants are
