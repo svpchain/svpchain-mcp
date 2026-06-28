@@ -279,6 +279,83 @@ func TestLoadConfig_BridgeAddresses(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_ForeignChains(t *testing.T) {
+	addr := "0x78Aca10afd5b28E838ECf0De20c5621CE39D9F4a"
+	bridgeAddr := "0x1111111111111111111111111111111111111111"
+	// Home bridge keys are bare top-level keys, so they must precede the
+	// [cache]/[limits] tables in validConfigTOML; the [[evm_foreign_chain]]
+	// array-of-tables must follow all bare keys, so it is appended at the end.
+	homeBridge := "evm_rpc_url = \"http://127.0.0.1:8545\"\n" +
+		"evm_bridge_addr = \"" + addr + "\"\n" +
+		"evm_bridge_routes_path = \"/tmp/routes.json\"\n" +
+		"evm_bridge_source_chain_id = 2517\n"
+	body := func(foreign string) string { return homeBridge + validConfigTOML + foreign }
+
+	oneChain := "\n[[evm_foreign_chain]]\nchain_id = 421614\n" +
+		"rpc_url = \"https://arb-sepolia.example\"\nbridge_addr = \"" + bridgeAddr + "\"\n"
+
+	t.Run("valid foreign chain", func(t *testing.T) {
+		cfg, err := LoadConfig(writeTempConfig(t, body(oneChain)))
+		require.NoError(t, err)
+		require.Len(t, cfg.EVMForeignChains, 1)
+		require.EqualValues(t, 421614, cfg.EVMForeignChains[0].ChainID)
+		require.Equal(t, "https://arb-sepolia.example", cfg.EVMForeignChains[0].RPCURL)
+		require.Equal(t, bridgeAddr, cfg.EVMForeignChains[0].BridgeAddr)
+	})
+
+	twoChains := oneChain + "\n[[evm_foreign_chain]]\nchain_id = 11155111\n" +
+		"rpc_url = \"https://sepolia.example\"\nbridge_addr = \"" + bridgeAddr + "\"\n"
+	t.Run("two distinct foreign chains", func(t *testing.T) {
+		cfg, err := LoadConfig(writeTempConfig(t, body(twoChains)))
+		require.NoError(t, err)
+		require.Len(t, cfg.EVMForeignChains, 2)
+	})
+
+	cases := []struct {
+		name        string
+		full        string
+		expectError string
+	}{
+		{
+			"foreign chain without home bridge",
+			validConfigTOML + oneChain,
+			"requires the bridge to be configured",
+		},
+		{
+			"missing chain_id",
+			homeBridge + validConfigTOML + "\n[[evm_foreign_chain]]\nrpc_url = \"https://x\"\nbridge_addr = \"" + bridgeAddr + "\"\n",
+			"chain_id is required",
+		},
+		{
+			"chain_id collides with home",
+			homeBridge + validConfigTOML + "\n[[evm_foreign_chain]]\nchain_id = 2517\nrpc_url = \"https://x\"\nbridge_addr = \"" + bridgeAddr + "\"\n",
+			"is the home chain",
+		},
+		{
+			"duplicate chain_id",
+			body(oneChain + oneChain),
+			"declared more than once",
+		},
+		{
+			"missing rpc_url",
+			homeBridge + validConfigTOML + "\n[[evm_foreign_chain]]\nchain_id = 421614\nbridge_addr = \"" + bridgeAddr + "\"\n",
+			"rpc_url is required",
+		},
+		{
+			"invalid bridge_addr",
+			homeBridge + validConfigTOML + "\n[[evm_foreign_chain]]\nchain_id = 421614\nrpc_url = \"https://x\"\nbridge_addr = \"0xnope\"\n",
+			"not a valid 0x address",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadConfig(writeTempConfig(t, tc.full))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.expectError)
+		})
+	}
+}
+
 func TestLoadConfig_BridgeRoutesPathResolution(t *testing.T) {
 	addr := "0x78Aca10afd5b28E838ECf0De20c5621CE39D9F4a"
 	base := "evm_rpc_url = \"http://127.0.0.1:8545\"\nevm_bridge_addr = \"" + addr +

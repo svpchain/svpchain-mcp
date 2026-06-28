@@ -87,25 +87,40 @@ func (h *Handlers) BroadcastEVMTx(
 			"evm sender %s does not match tenant owner %s", from.Hex(), ownerEth.Hex())
 	}
 
+	// Route to the chain the tx was signed for: a configured foreign chain
+	// (inbound bridge deposit) goes to its own RPC; everything else goes to the
+	// home (svpchain) client, preserving single-chain behavior.
+	client := h.Deps.Chain.EVM
+	isHome := true
+	if fc, ok := h.Deps.EVM.ForeignChains[tx.ChainId().Uint64()]; ok {
+		client = fc.Client
+		isHome = false
+	}
+
 	// Per-symbol daily transfer-out cap (EVM rail): native-value sends and
 	// direct ERC-20 transfers accumulate against the same per-owner ledger as
 	// x/bank sends, so e.g. usdc leaving via bank and via its ERC-20 share one
 	// daily total. Recorded only after a successful send, below. The router /
 	// WSVP addresses (zero when swaps are disabled) let the decoder exclude
-	// swap/wrap legs.
-	var router, wsvp common.Address
-	if h.Deps.EVM.Uniswap != nil {
-		router = h.Deps.EVM.Uniswap.Router()
-		wsvp = h.Deps.EVM.Uniswap.WSVP()
-	}
-	transferOut := decodeTransferOut(tx.To(), tx.Value(), tx.Data(), ownerEth, router, wsvp)
-	for sym, amt := range transferOut {
-		if err := h.Deps.TransferOut.Check(tp.Owner, sym, amt); err != nil {
-			return nil, BroadcastEVMTxOutput{}, err
+	// swap/wrap legs. Caps are svpchain-symbol based, so they apply to the home
+	// chain only — an inbound foreign-chain deposit is a credit to svpchain, not
+	// an outflow, and its foreign tokens are not svpchain symbols.
+	var transferOut map[string]*big.Int
+	if isHome {
+		var router, wsvp common.Address
+		if h.Deps.EVM.Uniswap != nil {
+			router = h.Deps.EVM.Uniswap.Router()
+			wsvp = h.Deps.EVM.Uniswap.WSVP()
+		}
+		transferOut = decodeTransferOut(tx.To(), tx.Value(), tx.Data(), ownerEth, router, wsvp)
+		for sym, amt := range transferOut {
+			if err := h.Deps.TransferOut.Check(tp.Owner, sym, amt); err != nil {
+				return nil, BroadcastEVMTxOutput{}, err
+			}
 		}
 	}
 
-	txHash, sendErr := h.Deps.Chain.EVM.SendTransaction(ctx, &tx)
+	txHash, sendErr := client.SendTransaction(ctx, &tx)
 	outcome := "broadcast"
 	reason := ""
 	if sendErr != nil {
@@ -194,7 +209,8 @@ func decodeTransferOut(to *common.Address, value *big.Int, data []byte, owner, r
 // -- evm_tx_status -----------------------------------------------------
 
 type EVMTxStatusInput struct {
-	TxHash string `json:"tx_hash" jsonschema:"0x hex tx hash returned by broadcast_evm_tx"`
+	TxHash  string `json:"tx_hash" jsonschema:"0x hex tx hash returned by broadcast_evm_tx"`
+	ChainID uint64 `json:"chain_id,omitempty" jsonschema:"EVM chain id the tx was broadcast on; omit for the home (svpchain) chain. For an inbound bridge deposit, pass the source_chain_id returned by build_bridge_deposit_inbound."`
 }
 
 type EVMTxStatusOutput struct {
@@ -215,7 +231,17 @@ func (h *Handlers) EVMTxStatus(
 	if h.Deps.Chain.EVM == nil {
 		return nil, EVMTxStatusOutput{}, userErrf("EVM is not enabled on this server (no evm_rpc_url configured)")
 	}
-	receipt, err := h.Deps.Chain.EVM.TransactionReceipt(ctx, common.HexToHash(in.TxHash))
+	// Default to the home (svpchain) client; an explicit chain_id routes to a
+	// configured foreign chain (e.g. an inbound bridge deposit's source chain).
+	client := h.Deps.Chain.EVM
+	if in.ChainID != 0 && in.ChainID != h.Deps.EVM.HomeChainID {
+		fc, ok := h.Deps.EVM.ForeignChains[in.ChainID]
+		if !ok {
+			return nil, EVMTxStatusOutput{}, userErrf("chain id %d is not configured on this server", in.ChainID)
+		}
+		client = fc.Client
+	}
+	receipt, err := client.TransactionReceipt(ctx, common.HexToHash(in.TxHash))
 	if err != nil {
 		// Not-yet-included is a legitimate empty result, not an error —
 		// mirror the indexer client's NotFound handling.

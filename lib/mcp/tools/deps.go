@@ -57,6 +57,42 @@ type EVMDeps struct {
 	Bridge              *builder.Bridge
 	BridgeRoutes        *bridge.Registry
 	BridgeSourceChainID uint64
+
+	// ForeignChains backs the inbound build_bridge_deposit_inbound tool: the
+	// foreign EVM chains that bridge INTO svpchain, keyed by their EVM chain id.
+	// Each bundle has its own dialed client, assembler, and SVPBridge binding, so
+	// the inbound deposit is built/broadcast/tracked on that chain rather than the
+	// home RPC. The route whitelist is shared (BridgeRoutes). Empty/nil unless
+	// [[evm_foreign_chain]] entries are configured; the inbound tool refuses then.
+	ForeignChains map[uint64]*ForeignChain
+
+	// HomeChainID is this deployment's EVM chain id (the home/svpchain RPC,
+	// Chain.EVM). Used to route broadcast/status to the home client and to scope
+	// inbound route lookups to (<foreign> -> home). Zero when the EVM family is
+	// unconfigured.
+	HomeChainID uint64
+}
+
+// ForeignChain is the per-foreign-chain bundle for inbound bridging: the EVM
+// JSON-RPC client, the assembler that fills nonce/gas/fees against it, and the
+// SVPBridge binding deployed on that chain.
+type ForeignChain struct {
+	Client    chain.EVMClient
+	Assembler *builder.EVMAssembler
+	Bridge    *builder.Bridge
+}
+
+// EVMClientFor returns the EVM JSON-RPC client for chainID: the home client
+// (Chain.EVM, scoped by HomeChainID) or a configured foreign chain's client.
+// Used to route broadcast_evm_tx / evm_tx_status to the chain a tx belongs to.
+func (d *Deps) EVMClientFor(chainID uint64) (chain.EVMClient, bool) {
+	if chainID == d.EVM.HomeChainID && d.Chain.EVM != nil {
+		return d.Chain.EVM, true
+	}
+	if fc, ok := d.EVM.ForeignChains[chainID]; ok {
+		return fc.Client, true
+	}
+	return nil, false
 }
 
 // Deps is the full dependency bundle every tool handler receives. v0.1

@@ -10,28 +10,180 @@ import (
 
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/bridge"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
 )
 
-// bridge.go is the SVPBridge cross-chain deposit tool — the per-contract EVM
-// build_* tool that bridges tokens OFF svpchain to another network (Sepolia /
-// Arbitrum Sepolia in the v1 deployment). The write flow mirrors the rest of the
-// EVM family: build_bridge_deposit returns an EVMTxPayload the caller signs on
-// the local signer (sign_evm_transaction) and submits via broadcast_evm_tx; the
-// bridge backend then watches the resulting Deposit event and releases the
-// mapped asset on the destination chain after its dispute period.
+// bridge.go is the SVPBridge cross-chain deposit tool family. Bridging is
+// bidirectional and both directions run the SAME algorithm — the only thing that
+// differs is the "leg": which chain the deposit tx executes on and which
+// SVPBridge deployment / RPC it targets.
+//
+//   - build_bridge_deposit (outbound): the tx runs on svpchain (home) and the
+//     bridge releases the mapped asset on a foreign chain (Sepolia / Arbitrum
+//     Sepolia in the v1 deployment).
+//   - build_bridge_deposit_inbound: the tx runs on a foreign chain and the bridge
+//     releases the asset on svpchain.
+//
+// Each handler only resolves its direction (which chain is fixed, which is
+// looked up) and assembles a bridgeLeg; assembleBridgeDeposit does the rest —
+// amount conversion, the native-vs-ERC20 branch, the allowance pre-check, payload
+// assembly, and the uniform BridgeDepositOutput. The write flow is the rest of
+// the EVM family's: the returned EVMTxPayload is signed on the local signer
+// (sign_evm_transaction) and submitted via broadcast_evm_tx, which routes to the
+// chain the tx was stamped for; the bridge backend then watches the Deposit event
+// and releases the asset on the destination chain after its dispute period.
 //
 // Routing intent (which destination token a given source token maps to) is NOT
 // guessed: it is resolved from the operator-supplied route registry
 // (evm_bridge_routes_path), which mirrors the cold-key (sourceToken,
 // targetChainId, targetToken) whitelist the bridge contract enforces on chain.
 // A pair the registry doesn't know is rejected here, before building a tx the
-// contract would revert.
-//
-// Native SVP rides as the tx value via depositNative; ERC-20s go through
-// deposit, which pulls via transferFrom — so this tool checks the bridge's
-// allowance first and points at build_erc20_approve (spender = the bridge) when
-// it is short, exactly as build_swap does for the router.
+// contract would revert. The native coin rides as the tx value via depositNative;
+// ERC-20s go through deposit, which pulls via transferFrom — so the algorithm
+// checks the bridge's allowance first and points at build_erc20_approve
+// (spender = the bridge) when it is short, exactly as build_swap does.
+
+// bridgeLeg is the direction-agnostic context for one deposit: the resolved
+// route plus the EVM deployment the deposit is built, allowance-checked, and
+// assembled against. SrcChainID is where the tx executes (and is stamped into
+// the signed payload for EIP-155); DestChainID is where the bridge releases the
+// asset. Bridge / Assembler / Client are that source chain's SVPBridge binding,
+// fee-filling assembler, and JSON-RPC client.
+type bridgeLeg struct {
+	Route       bridge.Route
+	SrcChainID  uint64
+	DestChainID uint64
+	Bridge      *builder.Bridge
+	Assembler   *builder.EVMAssembler
+	Client      chain.EVMClient
+}
+
+// BridgeDepositOutput is the uniform result of both bridge tools: the
+// ready-to-sign payload plus the resolved route. SourceChainID is the chain the
+// deposit tx runs on (== the payload's stamped chain id); DestChainID is the
+// chain the asset is released on.
+type BridgeDepositOutput struct {
+	Payload       payload.EVMTxPayload `json:"payload"`
+	SourceChainID uint64               `json:"source_chain_id"` // EVM chain id the deposit tx executes on
+	DestChainID   uint64               `json:"dest_chain_id"`   // EVM chain id the asset is released on
+	Symbol        string               `json:"symbol"`          // bridged asset symbol
+	SourceToken   string               `json:"source_token"`    // 0x on the source chain, or "native"
+	TargetToken   string               `json:"target_token"`    // 0x on the dest chain, or "native"
+	Recipient     string               `json:"recipient"`       // 0x recipient on the dest chain
+	AmountBase    string               `json:"amount_base"`     // base units (integer)
+}
+
+// buildBridge is the shared entry path for both bridge tools: authorize, resolve
+// the sender/recipient, then run the direction-specific resolveLeg (which gates
+// config and looks up the route in its direction) and hand the leg to the uniform
+// assembleBridgeDeposit. The only thing a handler supplies is its tool name, the
+// common inputs, and resolveLeg — everything else is identical across directions.
+func (h *Handlers) buildBridge(
+	ctx context.Context, tool, amount, recipientArg, clientID string, resolveLeg func() (bridgeLeg, error),
+) (*mcp.CallToolResult, BridgeDepositOutput, error) {
+	tp, err := h.authorize(ctx, tool)
+	if err != nil {
+		return nil, BridgeDepositOutput{}, err
+	}
+	from, recipient, err := bridgeParties(tp.Owner, recipientArg)
+	if err != nil {
+		return nil, BridgeDepositOutput{}, err
+	}
+	leg, err := resolveLeg()
+	if err != nil {
+		return nil, BridgeDepositOutput{}, err
+	}
+	out, err := h.assembleBridgeDeposit(ctx, leg, from, recipient, amount, clientID, tool)
+	if err != nil {
+		return nil, BridgeDepositOutput{}, err
+	}
+	return nil, *out, nil
+}
+
+// assembleBridgeDeposit is the uniform deposit-construction algorithm both bridge
+// tools share. Given a fully-resolved leg, it converts the human amount via the
+// route's decimals, picks depositNative (native coin, value-carried) or deposit
+// (ERC-20, allowance-checked on the source chain) accordingly, assembles the
+// EVMTxPayload against the leg's assembler, and returns the uniform output.
+// toolName is stamped into the payload summary and used in the "approve first"
+// retry hint so each direction points back at itself.
+func (h *Handlers) assembleBridgeDeposit(
+	ctx context.Context, leg bridgeLeg, from, recipient common.Address, amountHuman, clientID, toolName string,
+) (*BridgeDepositOutput, error) {
+	amount, err := humanToBaseUnits(amountHuman, leg.Route.Decimals)
+	if err != nil {
+		return nil, fmt.Errorf("amount: %w", err)
+	}
+	amountBase := amount.BigInt()
+
+	var (
+		data  []byte
+		value *big.Int
+	)
+	if leg.Route.NativeSource() {
+		data, err = leg.Bridge.PackDepositNative(leg.DestChainID, leg.Route.TargetToken, recipient)
+		value = amountBase // the native coin rides as the tx value
+	} else {
+		// deposit() pulls via transferFrom — verify the bridge's allowance on the
+		// source chain covers this deposit before building, so the agent gets a
+		// structured "approve first" instead of an on-chain revert after signing.
+		if err := h.checkBridgeAllowance(ctx, leg.Client, leg.Route.SrcToken, from, leg.Bridge.Contract(), amountBase, amountHuman, toolName); err != nil {
+			return nil, err
+		}
+		data, err = leg.Bridge.PackDeposit(leg.Route.SrcToken, amountBase, leg.DestChainID, leg.Route.TargetToken, recipient)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	p, err := leg.Assembler.Assemble(ctx, builder.EVMArgs{
+		ClientID: clientID,
+		From:     from,
+		To:       leg.Bridge.Contract(),
+		Data:     data,
+		Value:    value,
+		Summary: payload.EVMSummary{
+			ToolName: toolName,
+			Description: fmt.Sprintf("bridge %s %s from chain %d to chain %d (recipient %s)",
+				amountHuman, leg.Route.Symbol, leg.SrcChainID, leg.DestChainID, recipient.Hex()),
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &BridgeDepositOutput{
+		Payload:       *p,
+		SourceChainID: leg.SrcChainID,
+		DestChainID:   leg.DestChainID,
+		Symbol:        leg.Route.Symbol,
+		SourceToken:   bridgeTokenLabel(leg.Route.SrcToken),
+		TargetToken:   bridgeTokenLabel(leg.Route.TargetToken),
+		Recipient:     recipient.Hex(),
+		AmountBase:    amountBase.String(),
+	}, nil
+}
+
+// bridgeParties resolves the deposit sender (the tenant owner's 0x address, which
+// is the same 20 bytes on every chain) and the recipient — the owner by default,
+// or an explicit override on the destination chain.
+func bridgeParties(owner, recipientArg string) (from, recipient common.Address, err error) {
+	from, err = ownerEthAddress(owner)
+	if err != nil {
+		return common.Address{}, common.Address{}, err
+	}
+	recipient = from
+	if recipientArg != "" {
+		recipient, err = parseEVMAddress(recipientArg, "recipient")
+		if err != nil {
+			return common.Address{}, common.Address{}, err
+		}
+	}
+	return from, recipient, nil
+}
+
+// -- build_bridge_deposit (outbound: svpchain -> foreign) --------------
 
 // requireBridge returns the bridge binding, the route registry, and the
 // configured source chain id, or a clean user error when the server was started
@@ -54,118 +206,116 @@ type BuildBridgeDepositInput struct {
 	ClientID  string `json:"client_id" jsonschema:"broadcast-idempotency uuid (echo into broadcast_evm_tx.client_id)"`
 }
 
-type BuildBridgeDepositOutput struct {
-	Payload     payload.EVMTxPayload `json:"payload"`
-	DestChainID uint64               `json:"dest_chain_id"` // resolved destination EVM chain id
-	Symbol      string               `json:"symbol"`        // bridged asset symbol
-	SourceToken string               `json:"source_token"`  // 0x on svpchain, or "native"
-	TargetToken string               `json:"target_token"`  // 0x on the destination chain, or "native"
-	Recipient   string               `json:"recipient"`     // 0x recipient on the destination chain
-	AmountBase  string               `json:"amount_base"`   // base units (integer)
-}
-
 // BuildBridgeDeposit constructs an SVPBridge deposit that bridges a token from
-// svpchain to a destination network. It resolves the (token, dest_chain) pair to
-// the destination asset via the route registry, converts the human amount via
-// the registry decimals, picks depositNative (native SVP, value-carried) or
-// deposit (ERC-20, allowance-checked) accordingly, and returns an EVMTxPayload —
-// sign with sign_evm_transaction then broadcast_evm_tx.
+// svpchain to a destination network. svpchain is the fixed source; the resolver
+// looks up the destination chain and the (token, dest) route, and buildBridge
+// runs the shared algorithm. Returns an EVMTxPayload — sign with
+// sign_evm_transaction then broadcast_evm_tx.
 func (h *Handlers) BuildBridgeDeposit(
 	ctx context.Context, _ *mcp.CallToolRequest, in BuildBridgeDepositInput,
-) (*mcp.CallToolResult, BuildBridgeDepositOutput, error) {
-	tp, err := h.authorize(ctx, "build_bridge_deposit")
-	if err != nil {
-		return nil, BuildBridgeDepositOutput{}, err
-	}
-	br, routes, srcChainID, err := h.requireBridge()
-	if err != nil {
-		return nil, BuildBridgeDepositOutput{}, err
-	}
-
-	from, err := ownerEthAddress(tp.Owner)
-	if err != nil {
-		return nil, BuildBridgeDepositOutput{}, err
-	}
-	recipient := from
-	if in.Recipient != "" {
-		recipient, err = parseEVMAddress(in.Recipient, "recipient")
+) (*mcp.CallToolResult, BridgeDepositOutput, error) {
+	return h.buildBridge(ctx, "build_bridge_deposit", in.Amount, in.Recipient, in.ClientID, func() (bridgeLeg, error) {
+		br, routes, srcChainID, err := h.requireBridge()
 		if err != nil {
-			return nil, BuildBridgeDepositOutput{}, err
+			return bridgeLeg{}, err
 		}
-	}
-
-	destChainID, err := routes.ResolveDestChain(in.DestChain, srcChainID)
-	if err != nil {
-		return nil, BuildBridgeDepositOutput{}, userErrf("%s", err.Error())
-	}
-	route, err := routes.Lookup(srcChainID, destChainID, in.Token)
-	if err != nil {
-		return nil, BuildBridgeDepositOutput{}, userErrf("%s", err.Error())
-	}
-
-	amount, err := humanToBaseUnits(in.Amount, route.Decimals)
-	if err != nil {
-		return nil, BuildBridgeDepositOutput{}, fmt.Errorf("amount: %w", err)
-	}
-	amountBase := amount.BigInt()
-
-	var (
-		data  []byte
-		value *big.Int
-	)
-	if route.NativeSource() {
-		data, err = br.PackDepositNative(destChainID, route.TargetToken, recipient)
-		value = amountBase // native SVP rides as the tx value
-	} else {
-		// deposit() pulls via transferFrom — verify the bridge's allowance covers
-		// this deposit before building, so the agent gets a structured "approve
-		// first" instead of an on-chain revert after signing.
-		if err := h.checkBridgeAllowance(ctx, route.SrcToken, from, br.Contract(), amountBase, in.Amount); err != nil {
-			return nil, BuildBridgeDepositOutput{}, err
+		destChainID, err := routes.ResolveDestChain(in.DestChain, srcChainID)
+		if err != nil {
+			return bridgeLeg{}, userErrf("%s", err.Error())
 		}
-		data, err = br.PackDeposit(route.SrcToken, amountBase, destChainID, route.TargetToken, recipient)
-	}
-	if err != nil {
-		return nil, BuildBridgeDepositOutput{}, err
-	}
-
-	p, err := h.Deps.EVM.Assembler.Assemble(ctx, builder.EVMArgs{
-		ClientID: in.ClientID,
-		From:     from,
-		To:       br.Contract(),
-		Data:     data,
-		Value:    value,
-		Summary: payload.EVMSummary{
-			ToolName: "build_bridge_deposit",
-			Description: fmt.Sprintf("bridge %s %s from svpchain to chain %d (recipient %s)",
-				in.Amount, route.Symbol, destChainID, recipient.Hex()),
-		},
+		route, err := routes.Lookup(srcChainID, destChainID, in.Token)
+		if err != nil {
+			return bridgeLeg{}, userErrf("%s", err.Error())
+		}
+		return bridgeLeg{
+			Route:       route,
+			SrcChainID:  srcChainID,
+			DestChainID: destChainID,
+			Bridge:      br,
+			Assembler:   h.Deps.EVM.Assembler,
+			Client:      h.Deps.Chain.EVM,
+		}, nil
 	})
-	if err != nil {
-		return nil, BuildBridgeDepositOutput{}, err
-	}
-
-	return nil, BuildBridgeDepositOutput{
-		Payload:     *p,
-		DestChainID: destChainID,
-		Symbol:      route.Symbol,
-		SourceToken: bridgeTokenLabel(route.SrcToken),
-		TargetToken: bridgeTokenLabel(route.TargetToken),
-		Recipient:   recipient.Hex(),
-		AmountBase:  amountBase.String(),
-	}, nil
 }
 
-// checkBridgeAllowance reads the bridge's allowance on the source token and
-// returns a user-facing "approve first" error if it does not cover amount.
+// -- build_bridge_deposit_inbound (inbound: foreign -> svpchain) -------
+
+// requireInboundBridge returns the route registry, the home (svpchain) EVM
+// chain id, and the configured foreign-chain bundles, or a clean user error
+// when the server was started without the inbound-bridge config the tool needs.
+func (h *Handlers) requireInboundBridge() (*bridge.Registry, uint64, map[uint64]*ForeignChain, error) {
+	if h.Deps.EVM.BridgeRoutes == nil {
+		return nil, 0, nil, userErrf("bridging is not enabled on this server (no evm_bridge_addr / evm_bridge_routes_path configured)")
+	}
+	if len(h.Deps.EVM.ForeignChains) == 0 {
+		return nil, 0, nil, userErrf("inbound bridging is not enabled on this server (no evm_foreign_chain configured)")
+	}
+	return h.Deps.EVM.BridgeRoutes, h.Deps.EVM.HomeChainID, h.Deps.EVM.ForeignChains, nil
+}
+
+type BuildBridgeDepositInboundInput struct {
+	SourceChain string `json:"source_chain" jsonschema:"foreign source network to bridge FROM: a chain name (\"sepolia\", \"arbitrum_sepolia\") or numeric EVM chain id (\"11155111\", \"421614\")"`
+	Token       string `json:"token" jsonschema:"token to bridge: a known symbol (\"USDC\", \"WETH\", \"SVP\"), a 0x source-token address on the foreign chain, or empty/\"native\" for the foreign chain's native coin"`
+	Amount      string `json:"amount" jsonschema:"amount in human units, e.g. \"1.5\" (converted via the token's registry decimals)"`
+	Recipient   string `json:"recipient,omitempty" jsonschema:"recipient 0x address on svpchain; defaults to your own address when omitted"`
+	ClientID    string `json:"client_id" jsonschema:"broadcast-idempotency uuid (echo into broadcast_evm_tx.client_id)"`
+}
+
+// BuildBridgeDepositInbound constructs an SVPBridge deposit on a FOREIGN chain
+// that bridges a token INTO svpchain — the inbound twin of BuildBridgeDeposit.
+// svpchain is the fixed destination; the resolver looks up the foreign source
+// chain and the (token, source) route and assembles the foreign leg (foreign
+// bridge + assembler + RPC), so buildBridge's shared algorithm stamps the foreign
+// chain's nonce/gas/fees and chain id. Returns an EVMTxPayload — sign with
+// sign_evm_transaction then broadcast_evm_tx (which routes to the foreign chain
+// by the tx's chain id); track it with evm_tx_status passing the returned
+// source_chain_id.
+func (h *Handlers) BuildBridgeDepositInbound(
+	ctx context.Context, _ *mcp.CallToolRequest, in BuildBridgeDepositInboundInput,
+) (*mcp.CallToolResult, BridgeDepositOutput, error) {
+	return h.buildBridge(ctx, "build_bridge_deposit_inbound", in.Amount, in.Recipient, in.ClientID, func() (bridgeLeg, error) {
+		routes, homeChainID, foreigns, err := h.requireInboundBridge()
+		if err != nil {
+			return bridgeLeg{}, err
+		}
+		srcChainID, err := routes.ResolveSourceChain(in.SourceChain, homeChainID)
+		if err != nil {
+			return bridgeLeg{}, userErrf("%s", err.Error())
+		}
+		fc, ok := foreigns[srcChainID]
+		if !ok {
+			// The route exists but no RPC/bridge is wired for that chain — config gap.
+			return bridgeLeg{}, userErrf(
+				"source chain %d has an inbound route but is not configured for inbound bridging (no matching evm_foreign_chain)", srcChainID)
+		}
+		route, err := routes.Lookup(srcChainID, homeChainID, in.Token)
+		if err != nil {
+			return bridgeLeg{}, userErrf("%s", err.Error())
+		}
+		return bridgeLeg{
+			Route:       route,
+			SrcChainID:  srcChainID,
+			DestChainID: homeChainID,
+			Bridge:      fc.Bridge,
+			Assembler:   fc.Assembler,
+			Client:      fc.Client,
+		}, nil
+	})
+}
+
+// -- shared helpers ----------------------------------------------------
+
+// checkBridgeAllowance reads the bridge's allowance on the source token (via the
+// given chain's client) and returns a user-facing "approve first" error pointing
+// at retryTool if it does not cover amount.
 func (h *Handlers) checkBridgeAllowance(
-	ctx context.Context, token, owner, bridgeAddr common.Address, amount *big.Int, amountHuman string,
+	ctx context.Context, client chain.EVMClient, token, owner, bridgeAddr common.Address, amount *big.Int, amountHuman, retryTool string,
 ) error {
 	data, err := builder.PackERC20Allowance(owner, bridgeAddr)
 	if err != nil {
 		return err
 	}
-	out, err := h.evmCall(ctx, token, data)
+	out, err := evmCallOn(ctx, client, token, data)
 	if err != nil {
 		return fmt.Errorf("read allowance for %s: %w", token.Hex(), err)
 	}
@@ -175,8 +325,8 @@ func (h *Handlers) checkBridgeAllowance(
 	}
 	if allowance.Cmp(amount) < 0 {
 		return userErrf(
-			"bridge allowance for %s is insufficient — call build_erc20_approve (token %s, spender %s, amount >= %s) first, then retry build_bridge_deposit",
-			token.Hex(), token.Hex(), bridgeAddr.Hex(), amountHuman)
+			"bridge allowance for %s is insufficient — call build_erc20_approve (token %s, spender %s, amount >= %s) first, then retry %s",
+			token.Hex(), token.Hex(), bridgeAddr.Hex(), amountHuman, retryTool)
 	}
 	return nil
 }

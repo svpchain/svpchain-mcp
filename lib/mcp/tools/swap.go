@@ -13,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
 )
 
@@ -170,9 +171,16 @@ func (h *Handlers) requireSwap() (*builder.UniswapV2, error) {
 	return h.Deps.EVM.Uniswap, nil
 }
 
-// evmCall runs a read-only eth_call against to with the given calldata.
+// evmCall runs a read-only eth_call against to with the given calldata on the
+// home (svpchain) EVM client.
 func (h *Handlers) evmCall(ctx context.Context, to common.Address, data []byte) ([]byte, error) {
-	return h.Deps.Chain.EVM.CallContract(ctx, ethereum.CallMsg{To: &to, Data: data})
+	return evmCallOn(ctx, h.Deps.Chain.EVM, to, data)
+}
+
+// evmCallOn is evmCall against an explicit client — used by inbound bridging to
+// read state (e.g. an allowance) on a foreign chain's RPC rather than the home one.
+func evmCallOn(ctx context.Context, client chain.EVMClient, to common.Address, data []byte) ([]byte, error) {
+	return client.CallContract(ctx, ethereum.CallMsg{To: &to, Data: data})
 }
 
 // tokenDecimals returns a token's decimals — 18 for native SVP, otherwise the

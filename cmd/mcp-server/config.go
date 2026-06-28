@@ -61,6 +61,15 @@ type Config struct {
 	EVMBridgeRoutesPath    string `toml:"evm_bridge_routes_path"`
 	EVMBridgeSourceChainID uint64 `toml:"evm_bridge_source_chain_id"`
 
+	// EVMForeignChains declares the foreign EVM chains that can bridge INTO
+	// svpchain, backing the inbound build_bridge_deposit_inbound tool. Each entry
+	// is a [[evm_foreign_chain]] table giving that chain's EVM chain id, its own
+	// JSON-RPC endpoint (the deposit is built/broadcast/tracked there, not on the
+	// home RPC), and the SVPBridge contract deployed on it. The route whitelist is
+	// shared with the outbound direction (evm_bridge_routes_path), so the home
+	// bridge must also be configured. Optional; when empty the inbound tool refuses.
+	EVMForeignChains []EVMForeignChain `toml:"evm_foreign_chain"`
+
 	// FaucetBaseURL is the faucet backend's HTTP base URL (e.g.
 	// "https://pre-faucet.svpchain.org"). Optional: when empty the faucet
 	// tools (faucet_claim / list_faucet_tokens) refuse. The faucet runs its
@@ -75,6 +84,16 @@ type Config struct {
 	Cache  CacheConfig  `toml:"cache"`
 	Limits LimitsConfig `toml:"limits"`
 	Fee    FeeConfig    `toml:"fee"`
+}
+
+// EVMForeignChain is one inbound source chain: its EVM chain id, its own
+// JSON-RPC endpoint, and the SVPBridge address deployed on it. The inbound
+// deposit is assembled (nonce/gas/fees), signed for ChainID, broadcast, and
+// status-tracked against this chain's RPC — never the home evm_rpc_url.
+type EVMForeignChain struct {
+	ChainID    uint64 `toml:"chain_id"`
+	RPCURL     string `toml:"rpc_url"`
+	BridgeAddr string `toml:"bridge_addr"`
 }
 
 // FeeConfig sets the gas fee stamped onto non-CLOB txs (deposit / withdraw /
@@ -181,6 +200,9 @@ func (c *Config) Validate() error {
 	if err := c.validateBridge(); err != nil {
 		return err
 	}
+	if err := c.validateForeignChains(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -210,6 +232,42 @@ func (c *Config) validateBridge() error {
 	}
 	if c.EVMRPCURL == "" {
 		return fmt.Errorf("evm_rpc_url is required when the bridge is configured")
+	}
+	return nil
+}
+
+// validateForeignChains enforces the inbound-bridge invariants: each
+// [[evm_foreign_chain]] needs a non-zero chain id, a non-empty RPC url, and a
+// valid 0x bridge address; chain ids must be unique and must not collide with
+// the home chain (evm_bridge_source_chain_id). Because inbound shares the home
+// route file, configuring any foreign chain requires the home bridge to be set
+// (which also guarantees evm_rpc_url). Per-chain inbound-route existence is
+// checked at wire time against the loaded registry, not here.
+func (c *Config) validateForeignChains() error {
+	if len(c.EVMForeignChains) == 0 {
+		return nil
+	}
+	if c.EVMBridgeAddr == "" {
+		return fmt.Errorf("evm_foreign_chain requires the bridge to be configured (evm_bridge_addr, evm_bridge_routes_path, evm_bridge_source_chain_id)")
+	}
+	seen := map[uint64]bool{}
+	for i, fc := range c.EVMForeignChains {
+		if fc.ChainID == 0 {
+			return fmt.Errorf("evm_foreign_chain[%d] chain_id is required", i)
+		}
+		if fc.ChainID == c.EVMBridgeSourceChainID {
+			return fmt.Errorf("evm_foreign_chain[%d] chain_id %d is the home chain (evm_bridge_source_chain_id)", i, fc.ChainID)
+		}
+		if seen[fc.ChainID] {
+			return fmt.Errorf("evm_foreign_chain[%d] chain_id %d is declared more than once", i, fc.ChainID)
+		}
+		seen[fc.ChainID] = true
+		if fc.RPCURL == "" {
+			return fmt.Errorf("evm_foreign_chain[%d] (chain_id %d) rpc_url is required", i, fc.ChainID)
+		}
+		if !common.IsHexAddress(fc.BridgeAddr) {
+			return fmt.Errorf("evm_foreign_chain[%d] (chain_id %d) bridge_addr %q is not a valid 0x address", i, fc.ChainID, fc.BridgeAddr)
+		}
 	}
 	return nil
 }

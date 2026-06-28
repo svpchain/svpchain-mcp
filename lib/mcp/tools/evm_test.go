@@ -1,12 +1,16 @@
 package tools
 
 import (
+	"context"
 	"math/big"
 	"testing"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/ethereum/go-ethereum/common"
+	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/policy"
 )
 
 // The svp bech32 prefix is configured by app's init (imported via
@@ -96,4 +100,55 @@ func TestDecodeTransferOut(t *testing.T) {
 	t.Run("contract creation (nil to) is ignored", func(t *testing.T) {
 		require.Empty(t, decodeTransferOut(nil, big.NewInt(5), nil, owner, router, wsvp))
 	})
+}
+
+// statusMock returns a receipt whose block number identifies which client
+// served it, so we can assert evm_tx_status routing by chain id.
+type statusMock struct {
+	mockForeignEVM
+	block int64
+}
+
+func (s *statusMock) TransactionReceipt(context.Context, common.Hash) (*ethtypes.Receipt, error) {
+	return &ethtypes.Receipt{
+		Status:      ethtypes.ReceiptStatusSuccessful,
+		BlockNumber: big.NewInt(s.block),
+		GasUsed:     21_000,
+	}, nil
+}
+
+func TestEVMTxStatus_RoutesByChainID(t *testing.T) {
+	home := &statusMock{mockForeignEVM: mockForeignEVM{chainID: 2517}, block: 100}
+	foreign := &statusMock{mockForeignEVM: mockForeignEVM{chainID: 421614}, block: 200}
+	h := &Handlers{Deps: Deps{
+		Chain: ChainDeps{EVM: home},
+		EVM: EVMDeps{
+			HomeChainID:   2517,
+			ForeignChains: map[uint64]*ForeignChain{421614: {Client: foreign}},
+		},
+		Policy:    policy.NewEngine([]policy.TenantPolicy{{TenantID: "t1", Owner: testTxOwner}}),
+		RateLimit: policy.NewRateLimiter(0, 0),
+	}}
+	ctx := WithTenant(context.Background(), TenantContext{TenantID: "t1", Owner: testTxOwner})
+	const hash = "0x0000000000000000000000000000000000000000000000000000000000000001"
+
+	// Default (no chain_id) → home client.
+	_, out, err := h.EVMTxStatus(ctx, nil, EVMTxStatusInput{TxHash: hash})
+	require.NoError(t, err)
+	require.Equal(t, int64(100), out.BlockNumber)
+
+	// Explicit home chain id → home client.
+	_, out, err = h.EVMTxStatus(ctx, nil, EVMTxStatusInput{TxHash: hash, ChainID: 2517})
+	require.NoError(t, err)
+	require.Equal(t, int64(100), out.BlockNumber)
+
+	// Foreign chain id → foreign client.
+	_, out, err = h.EVMTxStatus(ctx, nil, EVMTxStatusInput{TxHash: hash, ChainID: 421614})
+	require.NoError(t, err)
+	require.Equal(t, int64(200), out.BlockNumber)
+
+	// Unknown chain id → clean error.
+	_, _, err = h.EVMTxStatus(ctx, nil, EVMTxStatusInput{TxHash: hash, ChainID: 999})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not configured")
 }

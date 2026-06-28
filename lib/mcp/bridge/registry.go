@@ -159,11 +159,33 @@ func routeKey(src, target uint64, last string) string {
 
 // ResolveDestChain resolves a destination argument (a chain name like "sepolia"
 // / "arbitrum_sepolia", or a numeric chain id like "11155111") to its chain id,
-// validating that at least one route exists from srcChainID to it.
+// validating that at least one route exists from srcChainID to it. Used by the
+// outbound build_bridge_deposit tool, where the source (svpchain) is fixed.
 func (r *Registry) ResolveDestChain(query string, srcChainID uint64) (uint64, error) {
+	return r.resolveChain(query, srcChainID, false)
+}
+
+// ResolveSourceChain resolves a source argument (a foreign chain name like
+// "sepolia" / "arbitrum_sepolia", or a numeric chain id) to its chain id,
+// validating that at least one route exists from it into targetChainID. The
+// inbound twin of ResolveDestChain: used by build_bridge_deposit_inbound, where
+// the target (svpchain) is fixed and the foreign source is what we resolve.
+func (r *Registry) ResolveSourceChain(query string, targetChainID uint64) (uint64, error) {
+	return r.resolveChain(query, targetChainID, true)
+}
+
+// resolveChain is the shared body of ResolveDestChain / ResolveSourceChain.
+// fixedID is the chain held constant (svpchain); fixedIsTarget selects the
+// direction: when true we resolve a source chain bridging INTO fixedID
+// (inbound), when false a destination chain bridging out OF fixedID (outbound).
+func (r *Registry) resolveChain(query string, fixedID uint64, fixedIsTarget bool) (uint64, error) {
+	noun, hint := "destination", r.targetHint(fixedID)
+	if fixedIsTarget {
+		noun, hint = "source", r.sourceHint(fixedID)
+	}
 	q := strings.TrimSpace(query)
 	if q == "" {
-		return 0, fmt.Errorf("destination chain is required (e.g. %s)", r.targetHint(srcChainID))
+		return 0, fmt.Errorf("%s chain is required (e.g. %s)", noun, hint)
 	}
 	var id uint64
 	if n, err := strconv.ParseUint(q, 10, 64); err == nil {
@@ -171,14 +193,21 @@ func (r *Registry) ResolveDestChain(query string, srcChainID uint64) (uint64, er
 	} else if cid, ok := r.nameToID[strings.ToLower(q)]; ok {
 		id = cid
 	} else {
-		return 0, fmt.Errorf("unknown destination chain %q; available: %s", query, r.targetHint(srcChainID))
+		return 0, fmt.Errorf("unknown %s chain %q; available: %s", noun, query, hint)
 	}
-	if id == srcChainID {
-		return 0, fmt.Errorf("destination chain %q is the source chain — nothing to bridge", query)
+	if id == fixedID {
+		return 0, fmt.Errorf("%s chain %q is the same as the %s chain — nothing to bridge",
+			noun, query, map[bool]string{true: "target", false: "source"}[fixedIsTarget])
 	}
-	if len(r.routesFor(srcChainID, id)) == 0 {
-		return 0, fmt.Errorf("no bridge route from chain %d to %q; available destinations: %s",
-			srcChainID, query, r.targetHint(srcChainID))
+	// Direction-aware route existence check: inbound looks for id -> fixedID,
+	// outbound for fixedID -> id.
+	src, target := fixedID, id
+	if fixedIsTarget {
+		src, target = id, fixedID
+	}
+	if len(r.routesFor(src, target)) == 0 {
+		return 0, fmt.Errorf("no bridge route %s chain %q; available %ss: %s",
+			map[bool]string{true: "from", false: "to"}[fixedIsTarget], query, noun, hint)
 	}
 	return id, nil
 }
@@ -251,6 +280,22 @@ func (r *Registry) AvailableTargets(srcChainID uint64) []ChainRef {
 	return out
 }
 
+// AvailableSources lists the distinct foreign chains that can bridge INTO
+// targetChainID, sorted by chain id. The inbound twin of AvailableTargets.
+func (r *Registry) AvailableSources(targetChainID uint64) []ChainRef {
+	seen := map[uint64]bool{}
+	var out []ChainRef
+	for _, rt := range r.routes {
+		if rt.TargetChainID != targetChainID || seen[rt.SrcChainID] {
+			continue
+		}
+		seen[rt.SrcChainID] = true
+		out = append(out, ChainRef{Name: r.idToName[rt.SrcChainID], ID: rt.SrcChainID})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
 // HasSource reports whether the registry contains any route originating from
 // srcChainID — used at startup to fail loudly on a source-chain misconfiguration.
 func (r *Registry) HasSource(srcChainID uint64) bool {
@@ -262,14 +307,33 @@ func (r *Registry) HasSource(srcChainID uint64) bool {
 	return false
 }
 
+// HasTarget reports whether the registry contains any route terminating at
+// targetChainID — used at startup to fail loudly when an inbound source chain
+// is configured but has no route into svpchain. The inbound twin of HasSource.
+func (r *Registry) HasTarget(targetChainID uint64) bool {
+	for _, rt := range r.routes {
+		if rt.TargetChainID == targetChainID {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Registry) targetHint(srcChainID uint64) string {
-	targets := r.AvailableTargets(srcChainID)
-	if len(targets) == 0 {
+	return chainHint(r.AvailableTargets(srcChainID))
+}
+
+func (r *Registry) sourceHint(targetChainID uint64) string {
+	return chainHint(r.AvailableSources(targetChainID))
+}
+
+func chainHint(chains []ChainRef) string {
+	if len(chains) == 0 {
 		return "(none configured)"
 	}
-	parts := make([]string, len(targets))
-	for i, t := range targets {
-		parts[i] = fmt.Sprintf("%s (%d)", t.Name, t.ID)
+	parts := make([]string, len(chains))
+	for i, c := range chains {
+		parts[i] = fmt.Sprintf("%s (%d)", c.Name, c.ID)
 	}
 	return strings.Join(parts, ", ")
 }

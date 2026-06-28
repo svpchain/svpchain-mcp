@@ -279,6 +279,15 @@ func registerEVMTools(srv *mcp.Server, h *Handlers) {
 		Description: "Construct an SVPBridge deposit that bridges a token from svpchain to another network (e.g. Sepolia, Arbitrum Sepolia). dest_chain is a chain name (\"sepolia\", \"arbitrum_sepolia\") or numeric EVM chain id; token is a known symbol (\"USDC\", \"WETH\"), a 0x source-token address, or empty/\"native\"/\"svp\" for native SVP; amount is human units; recipient defaults to your own address on the destination chain. The (token, dest_chain) pair is validated against the configured route whitelist. For ERC-20 tokens the bridge must be approved first (returns an \"approve first\" error pointing at build_erc20_approve with spender=the bridge if missing); native SVP needs no approval. Returns an EVMTxPayload — pass to sign_evm_transaction (local signer) then broadcast_evm_tx. Requires evm_rpc_url + evm_bridge_addr + evm_bridge_routes_path; refuses otherwise.",
 	}, h.BuildBridgeDeposit)
 
+	// SVPBridge inbound deposit — bridge tokens INTO svpchain FROM a foreign
+	// network. The deposit is built/broadcast/tracked on the foreign chain (its
+	// own RPC, chain id, gas), so it needs a configured [[evm_foreign_chain]];
+	// the route whitelist is shared with the outbound direction.
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "build_bridge_deposit_inbound",
+		Description: "Construct an SVPBridge deposit on a foreign network that bridges a token INTO svpchain (the inbound counterpart of build_bridge_deposit). source_chain is the foreign chain name (\"sepolia\", \"arbitrum_sepolia\") or numeric EVM chain id; token is a known symbol (\"USDC\", \"WETH\", \"SVP\"), a 0x source-token address on the foreign chain, or empty/\"native\" for the foreign native coin; amount is human units; recipient defaults to your own address on svpchain. The (token, source_chain) pair is validated against the configured route whitelist. For ERC-20 tokens the foreign bridge must be approved first on the foreign chain (returns an \"approve first\" error pointing at build_erc20_approve with spender=the foreign bridge if missing); the native coin needs no approval. The returned EVMTxPayload is stamped with the FOREIGN chain id — sign with sign_evm_transaction then broadcast_evm_tx (which routes to the foreign chain), and track with evm_tx_status passing the returned source_chain_id. Requires evm_bridge_* plus at least one [[evm_foreign_chain]]; refuses otherwise.",
+	}, h.BuildBridgeDepositInbound)
+
 	// Generic ERC-20 / ERC-721 build_* family — transfer / approve on any token
 	// contract. Like the swap tools they return an EVMTxPayload (sign with
 	// sign_evm_transaction, then broadcast_evm_tx). ERC-20 amounts are human

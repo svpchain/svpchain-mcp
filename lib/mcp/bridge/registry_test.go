@@ -108,3 +108,58 @@ func TestAvailableTargets(t *testing.T) {
 	require.True(t, reg.HasSource(svpChainID))
 	require.False(t, reg.HasSource(999999))
 }
+
+func TestResolveSourceChain(t *testing.T) {
+	reg := load(t)
+
+	// by name — arbitrum_sepolia is the one chain with an inbound route to svpchain.
+	id, err := reg.ResolveSourceChain("arbitrum_sepolia", svpChainID)
+	require.NoError(t, err)
+	require.Equal(t, uint64(421614), id)
+
+	// by numeric id
+	id, err = reg.ResolveSourceChain("421614", svpChainID)
+	require.NoError(t, err)
+	require.Equal(t, uint64(421614), id)
+
+	// unknown chain
+	_, err = reg.ResolveSourceChain("optimism", svpChainID)
+	require.ErrorContains(t, err, "unknown source chain")
+
+	// self
+	_, err = reg.ResolveSourceChain("2517", svpChainID)
+	require.ErrorContains(t, err, "target chain")
+
+	// sepolia is a known chain but has no inbound route to svpchain (outbound only).
+	_, err = reg.ResolveSourceChain("sepolia", svpChainID)
+	require.ErrorContains(t, err, "no bridge route")
+}
+
+func TestLookup_Inbound(t *testing.T) {
+	reg := load(t)
+	src, err := reg.ResolveSourceChain("arbitrum_sepolia", svpChainID)
+	require.NoError(t, err)
+
+	// Inbound SVP: the source token is the SVP ERC-20 on arbitrum (not native),
+	// releasing native SVP (0x0) on svpchain — so it rides the ERC-20 deposit path.
+	rt, err := reg.Lookup(src, svpChainID, "SVP")
+	require.NoError(t, err)
+	require.Equal(t, "SVP", rt.Symbol)
+	require.Equal(t, int64(18), rt.Decimals)
+	require.False(t, rt.NativeSource(), "inbound SVP source is the arbitrum ERC-20")
+	require.Equal(t, common.HexToAddress("0x7a8EcFa70374c1B8702CB98aaf23dE19675981d6"), rt.SrcToken)
+	require.True(t, rt.TargetToken == (common.Address{}), "releases native SVP on svpchain")
+
+	// A token with no inbound route from arbitrum is rejected.
+	_, err = reg.Lookup(src, svpChainID, "USDC")
+	require.ErrorContains(t, err, "not bridgeable")
+}
+
+func TestAvailableSources(t *testing.T) {
+	reg := load(t)
+	sources := reg.AvailableSources(svpChainID)
+	require.Len(t, sources, 1) // only arbitrum_sepolia bridges into svpchain
+	require.Equal(t, uint64(421614), sources[0].ID)
+	require.True(t, reg.HasTarget(svpChainID))
+	require.False(t, reg.HasTarget(999999))
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"cosmossdk.io/log"
@@ -132,6 +133,43 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 			evmDeps.Bridge = br
 			evmDeps.BridgeRoutes = routes
 			evmDeps.BridgeSourceChainID = cfg.EVMBridgeSourceChainID
+			evmDeps.HomeChainID = cfg.EVMBridgeSourceChainID
+
+			// Inbound bridging: each [[evm_foreign_chain]] gets its own dialed
+			// client + assembler + SVPBridge binding so build_bridge_deposit_inbound
+			// can build/broadcast/track a deposit on that chain. The shared route
+			// file must contain a route from the foreign chain into svpchain, else
+			// the chain is configured but nothing is bridgeable — fail loudly, the
+			// inbound twin of the HasSource guard above. Config validation already
+			// guarantees the bridge is set whenever foreign chains are.
+			if len(cfg.EVMForeignChains) > 0 {
+				foreign := make(map[uint64]*tools.ForeignChain, len(cfg.EVMForeignChains))
+				for _, fc := range cfg.EVMForeignChains {
+					// ResolveSourceChain fails when the shared route file has no
+					// route from this foreign chain into svpchain — the inbound
+					// twin of the HasSource guard above.
+					if _, err := routes.ResolveSourceChain(strconv.FormatUint(fc.ChainID, 10), cfg.EVMBridgeSourceChainID); err != nil {
+						grpcConn.Close()
+						return nil, fmt.Errorf("evm_foreign_chain %d: %w", fc.ChainID, err)
+					}
+					fbr, err := builder.NewBridge(common.HexToAddress(fc.BridgeAddr))
+					if err != nil {
+						grpcConn.Close()
+						return nil, fmt.Errorf("foreign bridge binding (chain %d): %w", fc.ChainID, err)
+					}
+					fclient, err := chain.NewEVMClient(ctx, fc.RPCURL)
+					if err != nil {
+						grpcConn.Close()
+						return nil, fmt.Errorf("foreign evm client (chain %d): %w", fc.ChainID, err)
+					}
+					foreign[fc.ChainID] = &tools.ForeignChain{
+						Client:    fclient,
+						Assembler: builder.NewEVMAssembler(fclient),
+						Bridge:    fbr,
+					}
+				}
+				evmDeps.ForeignChains = foreign
+			}
 		}
 	}
 
