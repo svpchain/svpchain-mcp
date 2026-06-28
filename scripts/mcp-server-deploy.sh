@@ -80,6 +80,13 @@
 #                                  scope route lookups to outbound-from-svpchain
 #                                  pairs. Default 2517.
 #                                  SVPCHAIN_EVM_BRIDGE_SOURCE_CHAIN_ID
+#   --evm-foreign-chains <list>    Inbound source chains ([[evm_foreign_chain]]),
+#                                  enabling build_bridge_deposit_inbound. ";"-
+#                                  separated "chainId,rpcUrl,bridgeAddr" triples.
+#                                  Defaults wire arbitrum_sepolia + sepolia (the
+#                                  sources the shipped routes advertise). Requires
+#                                  the bridge to be on. Set "" to disable inbound.
+#                                  SVPCHAIN_EVM_FOREIGN_CHAINS
 #   --install-dir <path>           Default ~/svpchain-mcp on remote (a
 #                                  leading ~ expands to the ssh user's $HOME).
 #   --image-tag <tag>              Default <git-short-sha>.
@@ -150,6 +157,16 @@ evm_bridge_addr="${SVPCHAIN_EVM_BRIDGE:-0x78Aca10afd5b28E838ECf0De20c5621CE39D9F
 evm_bridge_routes="${SVPCHAIN_EVM_BRIDGE_ROUTES:-routes.json}"
 evm_bridge_routes_src="${SVPCHAIN_EVM_BRIDGE_ROUTES_SRC:-}"
 evm_bridge_source_chain_id="${SVPCHAIN_EVM_BRIDGE_SOURCE_CHAIN_ID:-2517}"
+# Inbound bridging ([[evm_foreign_chain]]): each foreign chain that can bridge
+# INTO svp_chain needs its own SVPBridge address + JSON-RPC endpoint (the deposit
+# is built / broadcast / tracked there, not on evm_rpc_url). Defaults wire the
+# two testnet sources the shipped route registry already advertises inbound
+# routes for (arbitrum_sepolia, sepolia), so build_bridge_deposit_inbound works
+# out of the box. Format: ";"-separated "chainId,rpcUrl,bridgeAddr" triples. Only
+# emitted when the bridge is enabled (config.go::validateForeignChains requires
+# it). Set --evm-foreign-chains "" to disable inbound bridging. See
+# emit_foreign_chains / render_mcp_toml.
+evm_foreign_chains="${SVPCHAIN_EVM_FOREIGN_CHAINS:-421614,https://sepolia-rollup.arbitrum.io/rpc,0xB6c74A758E3fA7bf57c22037821f7cA974d0CdfD;11155111,https://ethereum-sepolia-rpc.publicnode.com,0xb9a9937006E886F0Ec145a19634426300dD20a64}"
 install_dir="~/svpchain-mcp"
 image_tag=""
 platform="linux/amd64"
@@ -186,6 +203,7 @@ while [[ $# -gt 0 ]]; do
     --evm-bridge-routes)      evm_bridge_routes="$2"; shift 2 ;;
     --evm-bridge-routes-src)  evm_bridge_routes_src="$2"; shift 2 ;;
     --evm-bridge-source-chain-id) evm_bridge_source_chain_id="$2"; shift 2 ;;
+    --evm-foreign-chains)     evm_foreign_chains="$2"; shift 2 ;;
     --install-dir)            install_dir="$2";       shift 2 ;;
     --image-tag)              image_tag="$2";         shift 2 ;;
     --platform)               platform="$2";          shift 2 ;;
@@ -210,6 +228,31 @@ done
 : "${host:=${SVPCHAIN_DEPLOY_HOST:-}}"
 
 # ---- shared helpers -------------------------------------------------------
+
+# emit_foreign_chains — emit the [[evm_foreign_chain]] array-of-tables parsed
+# from evm_foreign_chains (";"-separated "chainId,rpcUrl,bridgeAddr" triples).
+# No-op when the list is empty (inbound disabled). A malformed triple (missing
+# field) fails the deploy loudly rather than shipping a half-configured chain.
+emit_foreign_chains() {
+  [[ -z "$evm_foreign_chains" ]] && return 0
+  local triple cid rpc addr
+  local saved_ifs="$IFS"
+  IFS=';'
+  for triple in $evm_foreign_chains; do
+    IFS="$saved_ifs"
+    [[ -z "$triple" ]] && continue
+    IFS=',' read -r cid rpc addr <<<"$triple"
+    if [[ -z "$cid" || -z "$rpc" || -z "$addr" ]]; then
+      fail "--evm-foreign-chains: malformed triple \"$triple\" (want chainId,rpcUrl,bridgeAddr)"
+    fi
+    printf '\n[[evm_foreign_chain]]\n'
+    printf 'chain_id    = %s\n' "$cid"
+    printf 'rpc_url     = "%s"\n' "$rpc"
+    printf 'bridge_addr = "%s"\n' "$addr"
+    IFS=';'
+  done
+  IFS="$saved_ifs"
+}
 
 # render_mcp_toml — emit the operator-side mcp.toml on stdout. listen_addr
 # is always 0.0.0.0:<port> inside the container; --network host on the
@@ -250,6 +293,10 @@ EOF
     echo "evm_bridge_addr             = \"${evm_bridge_addr}\""
     echo "evm_bridge_routes_path      = \"${evm_bridge_routes}\""
     echo "evm_bridge_source_chain_id  = ${evm_bridge_source_chain_id}"
+    # Inbound [[evm_foreign_chain]] array-of-tables, emitted after the top-level
+    # bridge keys (TOML: bare keys must precede any table header) and only when
+    # the bridge is on (validateForeignChains requires it).
+    emit_foreign_chains
   elif [[ -n "$evm_bridge_routes" ]]; then
     echo "# WARNING: --evm-bridge-routes set but evm_bridge_addr / evm_bridge_source_chain_id are empty;" >&2
     echo "#          bridge omitted (config.go::validateBridge requires all three)." >&2
