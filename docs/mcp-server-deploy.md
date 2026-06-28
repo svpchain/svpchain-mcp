@@ -128,21 +128,30 @@ do not enable the transfer tools (`build_bank_send`, `broadcast_evm_tx`)
 for that tenant. Caps and usage are keyed by owner wallet and reset at UTC
 midnight.
 
-By default the cap state lives only in memory and is lost on restart (so a
-restart re-opens every wallet's full daily allowance). Set
-`transfer_out_cap_path` to a writable JSON file to persist both the caps and
-today's usage tally across restarts:
+The cap state's lifetime depends on `transfer_out_cap_path`. When unset, it
+lives only in memory and is lost on restart (so a restart re-opens every
+wallet's full daily allowance). When set, both the caps and today's usage tally
+are persisted to that JSON file and reloaded on boot:
 
 ```toml
-# Optional. When set, caps + today's usage survive a restart.
-# A relative path resolves next to this config file (like
-# evm_bridge_routes_path). Created on first write; need not exist at startup.
+# When set, caps + today's usage survive a restart. A relative path resolves
+# next to this config file (like evm_bridge_routes_path); an absolute path is
+# used as-is. Created on first write; need not exist at startup.
 transfer_out_cap_path = "transfer-out-caps.json"
 ```
 
 The server rewrites the file (atomically) after every cap change and every
 successful transfer, and reloads it on boot. A corrupt or hand-edited file
 fails startup loudly rather than silently dropping every cap.
+
+**Persistence is on by default in this deploy script.** `render_mcp_toml` emits
+an **absolute** `transfer_out_cap_path = "/var/lib/svpchain-mcp/transfer-out-caps.json"`,
+and `render_compose_yaml` bind-mounts the host dir `<install_dir>/data` read-write
+at `/var/lib/svpchain-mcp` so the file survives container recreates and redeploys.
+An absolute path (not config-dir-relative) is required here: the config dir
+`/etc/svpchain-mcp` only holds the read-only `mcp.toml` mount, so a relative path
+would write into the container's ephemeral layer and be lost on the next deploy.
+The cap JSON is inspectable / backup-able on the host at `<install_dir>/data/transfer-out-caps.json`.
 
 ## Redeploy after a rebuild
 

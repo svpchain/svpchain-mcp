@@ -117,13 +117,13 @@ prompt injection 的 agent 的硬防护 —— 这类 agent 可以先调用
 边界，就不要为该 tenant 启用转出工具（`build_bank_send`、
 `broadcast_evm_tx`）。上限与用量按 owner 钱包隔离，UTC 跨日时重置。
 
-默认情况下上限状态只保存在内存里，重启即丢失（于是重启会重新放开每个
-钱包当日的全部额度）。把 `transfer_out_cap_path` 指向一个可写的 JSON
-文件，即可让上限与当日已用量在重启后依然保留：
+上限状态的存活取决于 `transfer_out_cap_path`。未设置时只保存在内存里，
+重启即丢失（于是重启会重新放开每个钱包当日的全部额度）。设置后，上限
+与当日已用量都会被持久化到该 JSON 文件，并在启动时重新加载：
 
 ```toml
-# 可选。设置后，上限 + 当日已用量在重启后依然保留。
-# 相对路径相对本配置文件解析（与 evm_bridge_routes_path 一致）；
+# 设置后，上限 + 当日已用量在重启后依然保留。相对路径相对本配置文件
+# 解析（与 evm_bridge_routes_path 一致）；绝对路径按原样使用。
 # 首次写入时创建，启动时不必预先存在。
 transfer_out_cap_path = "transfer-out-caps.json"
 ```
@@ -131,6 +131,15 @@ transfer_out_cap_path = "transfer-out-caps.json"
 每次修改上限、每次转账成功后，server 都会（原子地）重写该文件，并在
 启动时重新加载。文件损坏或被手工改坏会让启动直接报错，而不是悄悄丢弃
 所有上限。
+
+**本部署脚本默认开启持久化。** `render_mcp_toml` 写入的是**绝对路径**
+`transfer_out_cap_path = "/var/lib/svpchain-mcp/transfer-out-caps.json"`，
+而 `render_compose_yaml` 会把宿主机目录 `<install_dir>/data` 以读写方式
+bind-mount 到 `/var/lib/svpchain-mcp`，使该文件在 container 重建 / redeploy
+后依然保留。这里必须用绝对路径（而非相对配置目录）：配置目录
+`/etc/svpchain-mcp` 只挂载了只读的 `mcp.toml`，相对路径会写进 container
+的临时层，在下次部署时丢失。该 JSON 在宿主机上可于
+`<install_dir>/data/transfer-out-caps.json` 查看或备份。
 
 ## 重新部署
 
