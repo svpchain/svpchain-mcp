@@ -10,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
 )
 
@@ -66,14 +67,22 @@ func parseTokenID(s string) (*big.Int, error) {
 	return v, nil
 }
 
-// erc20Decimals reads a token's on-chain decimals() via eth_call. Generic over
-// any ERC-20 — does not depend on the Uniswap binding (cf. tokenDecimals).
+// erc20Decimals reads a token's on-chain decimals() via eth_call on the home
+// (svpchain) client. Generic over any ERC-20 — does not depend on the Uniswap
+// binding (cf. tokenDecimals).
 func (h *Handlers) erc20Decimals(ctx context.Context, token common.Address) (int64, error) {
+	return h.erc20DecimalsOn(ctx, h.Deps.Chain.EVM, token)
+}
+
+// erc20DecimalsOn is erc20Decimals against an explicit client, so a tool
+// targeting a foreign chain (e.g. build_erc20_approve with chain_id) reads
+// decimals on that chain's RPC rather than the home one.
+func (h *Handlers) erc20DecimalsOn(ctx context.Context, client chain.EVMClient, token common.Address) (int64, error) {
 	data, err := builder.PackERC20Decimals()
 	if err != nil {
 		return 0, err
 	}
-	out, err := h.evmCall(ctx, token, data)
+	out, err := evmCallOn(ctx, client, token, data)
 	if err != nil {
 		return 0, fmt.Errorf("read decimals for %s (is it an ERC-20?): %w", token.Hex(), err)
 	}
@@ -84,16 +93,35 @@ func (h *Handlers) erc20Decimals(ctx context.Context, token common.Address) (int
 	return int64(dec), nil
 }
 
+// evmAssemblerFor returns the EVM assembler + client to build a tx for chainID:
+// the home pair (Deps.EVM.Assembler / Deps.Chain.EVM) when chainID is 0 or the
+// home id, else a configured foreign chain's bundle. Mirrors EVMClientFor /
+// evm_tx_status's routing so a build tool can target a foreign chain — e.g.
+// approving a foreign bridge as spender for an inbound deposit, which must be
+// assembled and signed for the foreign chain id, not the home one.
+func (h *Handlers) evmAssemblerFor(chainID uint64) (*builder.EVMAssembler, chain.EVMClient, error) {
+	if chainID == 0 || chainID == h.Deps.EVM.HomeChainID {
+		return h.Deps.EVM.Assembler, h.Deps.Chain.EVM, nil
+	}
+	fc, ok := h.Deps.EVM.ForeignChains[chainID]
+	if !ok {
+		return nil, nil, userErrf("chain_id %d is not configured on this server (no home or evm_foreign_chain match)", chainID)
+	}
+	return fc.Assembler, fc.Client, nil
+}
+
 // assembleERC is the shared tail: stamp a ready-to-sign EVMTxPayload for a
-// value-0 contract call from the tenant owner to `to` with `data`.
+// value-0 contract call from the tenant owner to `to` with `data`, using the
+// given assembler (home for most tools; a foreign assembler when a tool targets
+// another chain). The assembler's bound client fixes the stamped chain id.
 func (h *Handlers) assembleERC(
-	ctx context.Context, owner string, to common.Address, data []byte, clientID, toolName, desc string,
+	ctx context.Context, asm *builder.EVMAssembler, owner string, to common.Address, data []byte, clientID, toolName, desc string,
 ) (*payload.EVMTxPayload, error) {
 	from, err := ownerEthAddress(owner)
 	if err != nil {
 		return nil, err
 	}
-	return h.Deps.EVM.Assembler.Assemble(ctx, builder.EVMArgs{
+	return asm.Assemble(ctx, builder.EVMArgs{
 		ClientID: clientID,
 		From:     from,
 		To:       to,
@@ -151,7 +179,7 @@ func (h *Handlers) BuildERC20Transfer(
 	if err != nil {
 		return nil, BuildERC20Output{}, err
 	}
-	p, err := h.assembleERC(ctx, tp.Owner, token, data, in.ClientID, "build_erc20_transfer",
+	p, err := h.assembleERC(ctx, h.Deps.EVM.Assembler, tp.Owner, token, data, in.ClientID, "build_erc20_transfer",
 		fmt.Sprintf("transfer %s of %s to %s", in.Amount, token.Hex(), to.Hex()))
 	if err != nil {
 		return nil, BuildERC20Output{}, err
@@ -166,6 +194,7 @@ type BuildERC20ApproveInput struct {
 	Spender   string `json:"spender" jsonschema:"spender 0x address authorized to pull tokens"`
 	Amount    string `json:"amount,omitempty" jsonschema:"allowance in human units, e.g. \"100\"; omit when unlimited=true"`
 	Unlimited bool   `json:"unlimited,omitempty" jsonschema:"approve the maximum (2^256-1); ignores amount"`
+	ChainID   uint64 `json:"chain_id,omitempty" jsonschema:"EVM chain id to build the approval for; omit for the home (svpchain) chain. To approve a foreign bridge before an inbound deposit, pass the chain_id from the bridge's 'approve first' message (the source_chain_id of build_bridge_deposit_inbound)."`
 	ClientID  string `json:"client_id" jsonschema:"broadcast-idempotency uuid (echo into broadcast_evm_tx.client_id)"`
 }
 
@@ -181,6 +210,14 @@ func (h *Handlers) BuildERC20Approve(
 	if err := h.requireEVM(); err != nil {
 		return nil, BuildERC20Output{}, err
 	}
+	// Resolve the target chain up front: omit/home builds on the home assembler
+	// (unchanged), a foreign chain_id builds on that chain's assembler + client so
+	// the approval is stamped with the foreign chain id and read against its RPC —
+	// required to approve a foreign bridge before an inbound deposit.
+	asm, client, err := h.evmAssemblerFor(in.ChainID)
+	if err != nil {
+		return nil, BuildERC20Output{}, err
+	}
 	token, err := parseEVMAddress(in.Token, "token")
 	if err != nil {
 		return nil, BuildERC20Output{}, err
@@ -192,7 +229,7 @@ func (h *Handlers) BuildERC20Approve(
 	amount := maxUint256
 	amountLabel := "unlimited"
 	if !in.Unlimited {
-		dec, err := h.erc20Decimals(ctx, token)
+		dec, err := h.erc20DecimalsOn(ctx, client, token)
 		if err != nil {
 			return nil, BuildERC20Output{}, err
 		}
@@ -207,7 +244,7 @@ func (h *Handlers) BuildERC20Approve(
 	if err != nil {
 		return nil, BuildERC20Output{}, err
 	}
-	p, err := h.assembleERC(ctx, tp.Owner, token, data, in.ClientID, "build_erc20_approve",
+	p, err := h.assembleERC(ctx, asm, tp.Owner, token, data, in.ClientID, "build_erc20_approve",
 		fmt.Sprintf("approve %s to spend %s of %s", spender.Hex(), amountLabel, token.Hex()))
 	if err != nil {
 		return nil, BuildERC20Output{}, err
@@ -262,7 +299,7 @@ func (h *Handlers) BuildERC20TransferFrom(
 	if err != nil {
 		return nil, BuildERC20Output{}, err
 	}
-	p, err := h.assembleERC(ctx, tp.Owner, token, data, in.ClientID, "build_erc20_transfer_from",
+	p, err := h.assembleERC(ctx, h.Deps.EVM.Assembler, tp.Owner, token, data, in.ClientID, "build_erc20_transfer_from",
 		fmt.Sprintf("transferFrom %s -> %s, %s of %s", from.Hex(), to.Hex(), in.Amount, token.Hex()))
 	if err != nil {
 		return nil, BuildERC20Output{}, err
@@ -317,7 +354,7 @@ func (h *Handlers) buildERC721Transfer(
 	if err != nil {
 		return nil, BuildERC721Output{}, err
 	}
-	p, err := h.assembleERC(ctx, tp.Owner, contract, data, in.ClientID, tool,
+	p, err := h.assembleERC(ctx, h.Deps.EVM.Assembler, tp.Owner, contract, data, in.ClientID, tool,
 		fmt.Sprintf("%s token %s on %s: %s -> %s", tool, in.TokenID, contract.Hex(), from.Hex(), to.Hex()))
 	if err != nil {
 		return nil, BuildERC721Output{}, err
@@ -377,7 +414,7 @@ func (h *Handlers) BuildERC721Approve(
 	if err != nil {
 		return nil, BuildERC721Output{}, err
 	}
-	p, err := h.assembleERC(ctx, tp.Owner, contract, data, in.ClientID, "build_erc721_approve",
+	p, err := h.assembleERC(ctx, h.Deps.EVM.Assembler, tp.Owner, contract, data, in.ClientID, "build_erc721_approve",
 		fmt.Sprintf("approve %s for token %s on %s", spender.Hex(), in.TokenID, contract.Hex()))
 	if err != nil {
 		return nil, BuildERC721Output{}, err
@@ -422,7 +459,7 @@ func (h *Handlers) BuildERC721SetApprovalForAll(
 	if in.Approved {
 		verb = "grant operator"
 	}
-	p, err := h.assembleERC(ctx, tp.Owner, contract, data, in.ClientID, "build_erc721_set_approval_for_all",
+	p, err := h.assembleERC(ctx, h.Deps.EVM.Assembler, tp.Owner, contract, data, in.ClientID, "build_erc721_set_approval_for_all",
 		fmt.Sprintf("%s %s for all of %s", verb, operator.Hex(), contract.Hex()))
 	if err != nil {
 		return nil, BuildERC721Output{}, err

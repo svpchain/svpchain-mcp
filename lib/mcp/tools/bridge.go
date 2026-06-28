@@ -128,7 +128,7 @@ func (h *Handlers) assembleBridgeDeposit(
 		// deposit() pulls via transferFrom — verify the bridge's allowance on the
 		// source chain covers this deposit before building, so the agent gets a
 		// structured "approve first" instead of an on-chain revert after signing.
-		if err := h.checkBridgeAllowance(ctx, leg.Client, leg.Route.SrcToken, from, leg.Bridge.Contract(), amountBase, amountHuman, toolName); err != nil {
+		if err := h.checkBridgeAllowance(ctx, leg.Client, leg.Route.SrcToken, from, leg.Bridge.Contract(), amountBase, amountHuman, toolName, leg.SrcChainID); err != nil {
 			return nil, err
 		}
 		data, err = leg.Bridge.PackDeposit(leg.Route.SrcToken, amountBase, leg.DestChainID, leg.Route.TargetToken, recipient)
@@ -307,9 +307,12 @@ func (h *Handlers) BuildBridgeDepositInbound(
 
 // checkBridgeAllowance reads the bridge's allowance on the source token (via the
 // given chain's client) and returns a user-facing "approve first" error pointing
-// at retryTool if it does not cover amount.
+// at retryTool if it does not cover amount. srcChainID is the chain the deposit
+// (and thus the approval) lives on; it is surfaced as build_erc20_approve's
+// chain_id so the approval is built/signed for the right chain — critical for
+// inbound, where the approval must target the foreign chain, not the home one.
 func (h *Handlers) checkBridgeAllowance(
-	ctx context.Context, client chain.EVMClient, token, owner, bridgeAddr common.Address, amount *big.Int, amountHuman, retryTool string,
+	ctx context.Context, client chain.EVMClient, token, owner, bridgeAddr common.Address, amount *big.Int, amountHuman, retryTool string, srcChainID uint64,
 ) error {
 	data, err := builder.PackERC20Allowance(owner, bridgeAddr)
 	if err != nil {
@@ -325,8 +328,8 @@ func (h *Handlers) checkBridgeAllowance(
 	}
 	if allowance.Cmp(amount) < 0 {
 		return userErrf(
-			"bridge allowance for %s is insufficient — call build_erc20_approve (token %s, spender %s, amount >= %s) first, then retry %s",
-			token.Hex(), token.Hex(), bridgeAddr.Hex(), amountHuman, retryTool)
+			"bridge allowance for %s is insufficient — call build_erc20_approve (token %s, spender %s, amount >= %s, chain_id %d) first, then retry %s",
+			token.Hex(), token.Hex(), bridgeAddr.Hex(), amountHuman, srcChainID, retryTool)
 	}
 	return nil
 }

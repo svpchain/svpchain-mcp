@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/policy"
 )
 
 // mockERCEVM is a full chain.EVMClient for the ERC build path: CallContract
@@ -82,6 +83,57 @@ func TestERC20Decimals(t *testing.T) {
 	require.Equal(t, int64(6), dec)
 }
 
+// TestBuildERC20Approve_ChainRouting covers the inbound-bridge fix: an approval
+// targets the home chain by default, but a chain_id routes it to that chain's
+// assembler + client so it is stamped with the foreign chain id (and decimals
+// are read there) — required to approve a foreign bridge before an inbound deposit.
+func TestBuildERC20Approve_ChainRouting(t *testing.T) {
+	const home = uint64(262144)
+	homeEVM := &mockERCEVM{decimals: 6}                         // ChainID 262144, nonce 7
+	foreignEVM := &mockForeignEVM{chainID: 421614, decimals: 6} // nonce 3
+	h := &Handlers{Deps: Deps{
+		Chain: ChainDeps{EVM: homeEVM},
+		EVM: EVMDeps{
+			Assembler:   builder.NewEVMAssembler(homeEVM),
+			HomeChainID: home,
+			ForeignChains: map[uint64]*ForeignChain{
+				421614: {Client: foreignEVM, Assembler: builder.NewEVMAssembler(foreignEVM)},
+			},
+		},
+		Policy:    policy.NewEngine([]policy.TenantPolicy{{TenantID: "t1", Owner: testTxOwner}}),
+		RateLimit: policy.NewRateLimiter(0, 0),
+	}}
+	ctx := WithTenant(context.Background(), TenantContext{TenantID: "t1", Owner: testTxOwner})
+	const token = "0x1111111111111111111111111111111111111111"
+	const spender = "0x2222222222222222222222222222222222222222"
+
+	t.Run("foreign chain_id stamps the foreign chain", func(t *testing.T) {
+		_, out, err := h.BuildERC20Approve(ctx, nil, BuildERC20ApproveInput{
+			Token: token, Spender: spender, Amount: "100", ChainID: 421614, ClientID: "c1",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "421614", out.Payload.EVMChainID)
+		require.Equal(t, "3", out.Payload.Nonce) // assembled against the foreign client
+	})
+
+	t.Run("omitted chain_id stays home", func(t *testing.T) {
+		_, out, err := h.BuildERC20Approve(ctx, nil, BuildERC20ApproveInput{
+			Token: token, Spender: spender, Unlimited: true, ClientID: "c2",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "262144", out.Payload.EVMChainID)
+		require.Equal(t, "7", out.Payload.Nonce)
+	})
+
+	t.Run("unknown chain_id is rejected", func(t *testing.T) {
+		_, _, err := h.BuildERC20Approve(ctx, nil, BuildERC20ApproveInput{
+			Token: token, Spender: spender, Unlimited: true, ChainID: 999, ClientID: "c3",
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not configured")
+	})
+}
+
 func TestAssembleERC_StampsPayload(t *testing.T) {
 	h := ercHandlers(&mockERCEVM{decimals: 6})
 	token := common.HexToAddress("0x1111111111111111111111111111111111111111")
@@ -90,7 +142,7 @@ func TestAssembleERC_StampsPayload(t *testing.T) {
 	data, err := builder.PackERC20Transfer(to, big.NewInt(1_000_000))
 	require.NoError(t, err)
 
-	p, err := h.assembleERC(context.Background(), testTxOwner, token, data, "cid", "build_erc20_transfer", "desc")
+	p, err := h.assembleERC(context.Background(), h.Deps.EVM.Assembler, testTxOwner, token, data, "cid", "build_erc20_transfer", "desc")
 	require.NoError(t, err)
 
 	require.Equal(t, token.Hex(), p.To)

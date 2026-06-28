@@ -25,6 +25,7 @@ import (
 type mockForeignEVM struct {
 	chainID   int64
 	allowance *big.Int
+	decimals  uint8
 }
 
 func (m *mockForeignEVM) CallContract(_ context.Context, msg ethereum.CallMsg) ([]byte, error) {
@@ -34,6 +35,9 @@ func (m *mockForeignEVM) CallContract(_ context.Context, msg ethereum.CallMsg) (
 			a = big.NewInt(0)
 		}
 		return common.LeftPadBytes(a.Bytes(), 32), nil
+	}
+	if bytes.Equal(msg.Data[:4], crypto.Keccak256([]byte("decimals()"))[:4]) {
+		return common.LeftPadBytes(big.NewInt(int64(m.decimals)).Bytes(), 32), nil
 	}
 	return nil, nil
 }
@@ -145,6 +149,9 @@ func TestBuildBridgeDepositInbound_AllowanceShort(t *testing.T) {
 	require.Contains(t, err.Error(), "build_erc20_approve")
 	// The spender called out is the FOREIGN bridge, not the home one.
 	require.Contains(t, err.Error(), common.HexToAddress(arbBridgeAddr).Hex())
+	// And it names the FOREIGN chain id so the approval is built for the right
+	// chain (the bug fix: build_erc20_approve defaults to the home chain).
+	require.Contains(t, err.Error(), "chain_id 421614")
 }
 
 func TestBuildBridgeDepositInbound_Native(t *testing.T) {
