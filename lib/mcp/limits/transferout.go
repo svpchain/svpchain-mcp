@@ -1,8 +1,10 @@
 package limits
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -49,11 +51,20 @@ func (e *ErrSymbolCapExceeded) Error() string {
 
 // MemoryTransferOutStore holds each owner wallet's per-symbol daily caps and
 // usage in one place. Caps persist until the owner changes them; the usage
-// tally resets at UTC midnight. Safe for concurrent use; in-memory only (state
-// resets on restart). A nil *MemoryTransferOutStore is usable and treats
-// everything as uncapped — the methods short-circuit.
+// tally resets at UTC midnight. Safe for concurrent use. A nil
+// *MemoryTransferOutStore is usable and treats everything as uncapped — the
+// methods short-circuit.
+//
+// When constructed with a non-empty path (LoadMemoryTransferOutStore), the
+// full state — caps, today's usage, and the day key — is written through to a
+// JSON file after every mutation and reloaded on the next boot, so neither the
+// configured caps nor the running daily total reset on restart. Without a path
+// (NewMemoryTransferOutStore) the store is in-memory only and resets on
+// restart, exactly as before.
 type MemoryTransferOutStore struct {
-	now func() time.Time
+	now   func() time.Time
+	path  string      // JSON write-through file; "" disables persistence
+	onErr func(error) // optional sink for write/marshal errors; nil swallows
 
 	mu   sync.Mutex
 	day  string                          // UTC date the `used` map is valid for
@@ -61,8 +72,9 @@ type MemoryTransferOutStore struct {
 	used map[string]map[string]*big.Int  // owner -> symbol -> base units today
 }
 
-// NewMemoryTransferOutStore returns an empty store (every symbol uncapped until
-// an owner sets a cap). Pass time.Now for wall-clock; tests inject a fake clock.
+// NewMemoryTransferOutStore returns an empty, non-persistent store (every
+// symbol uncapped until an owner sets a cap; state resets on restart). Pass
+// time.Now for wall-clock; tests inject a fake clock.
 func NewMemoryTransferOutStore(now func() time.Time) *MemoryTransferOutStore {
 	if now == nil {
 		now = time.Now
@@ -71,6 +83,137 @@ func NewMemoryTransferOutStore(now func() time.Time) *MemoryTransferOutStore {
 		now:  now,
 		caps: map[string]map[string]SymbolCap{},
 		used: map[string]map[string]*big.Int{},
+	}
+}
+
+// persistedSymbolCap is the on-disk form of SymbolCap: the base-unit cap is a
+// decimal string because JSON has no big-integer type.
+type persistedSymbolCap struct {
+	Symbol   string `json:"symbol"`
+	Decimals int64  `json:"decimals"`
+	CapBase  string `json:"cap_base"`
+}
+
+// persistedTransferOut is the full on-disk snapshot of the store. Usage amounts
+// are decimal strings for the same reason as CapBase.
+type persistedTransferOut struct {
+	Day  string                                   `json:"day"`
+	Caps map[string]map[string]persistedSymbolCap `json:"caps"`
+	Used map[string]map[string]string             `json:"used"`
+}
+
+// LoadMemoryTransferOutStore returns a store that writes its full state through
+// to the JSON file at path after every mutation and rehydrates from it here.
+// An empty path yields a non-persistent store (identical to
+// NewMemoryTransferOutStore). A missing file is not an error — the store starts
+// empty and the file is created on the first write. A present-but-unparseable
+// file is an error, so a corrupt or hand-edited file fails startup loudly
+// rather than silently dropping every cap. onErr (may be nil) receives any
+// write/marshal error encountered after startup; the in-memory state stays
+// authoritative and the next successful write reconciles the file.
+func LoadMemoryTransferOutStore(path string, now func() time.Time, onErr func(error)) (*MemoryTransferOutStore, error) {
+	s := NewMemoryTransferOutStore(now)
+	s.path = path
+	s.onErr = onErr
+	if path == "" {
+		return s, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return s, nil
+		}
+		return nil, fmt.Errorf("read transfer-out cap file %s: %w", path, err)
+	}
+	var snap persistedTransferOut
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		return nil, fmt.Errorf("parse transfer-out cap file %s: %w", path, err)
+	}
+	s.day = snap.Day
+	for owner, bySym := range snap.Caps {
+		for sym, pc := range bySym {
+			capBase, ok := new(big.Int).SetString(pc.CapBase, 10)
+			if !ok {
+				return nil, fmt.Errorf("transfer-out cap file %s: owner %s symbol %s: bad cap_base %q", path, owner, sym, pc.CapBase)
+			}
+			if s.caps[owner] == nil {
+				s.caps[owner] = map[string]SymbolCap{}
+			}
+			s.caps[owner][sym] = SymbolCap{Symbol: pc.Symbol, Decimals: pc.Decimals, CapBase: capBase}
+		}
+	}
+	for owner, bySym := range snap.Used {
+		for sym, amt := range bySym {
+			v, ok := new(big.Int).SetString(amt, 10)
+			if !ok {
+				return nil, fmt.Errorf("transfer-out cap file %s: owner %s symbol %s: bad used amount %q", path, owner, sym, amt)
+			}
+			if s.used[owner] == nil {
+				s.used[owner] = map[string]*big.Int{}
+			}
+			s.used[owner][sym] = v
+		}
+	}
+	return s, nil
+}
+
+// persistLocked writes the full store state through to s.path atomically (temp
+// file + rename). A no-op when persistence is disabled. Errors are routed to
+// s.onErr rather than returned, so a write failure never aborts the transfer
+// whose Record triggered it — the broadcast already happened. Must be called
+// with s.mu held.
+func (s *MemoryTransferOutStore) persistLocked() {
+	if s.path == "" {
+		return
+	}
+	snap := persistedTransferOut{
+		Day:  s.day,
+		Caps: map[string]map[string]persistedSymbolCap{},
+		Used: map[string]map[string]string{},
+	}
+	for owner, bySym := range s.caps {
+		if len(bySym) == 0 {
+			continue
+		}
+		snap.Caps[owner] = map[string]persistedSymbolCap{}
+		for sym, c := range bySym {
+			capStr := "0"
+			if c.CapBase != nil {
+				capStr = c.CapBase.String()
+			}
+			snap.Caps[owner][sym] = persistedSymbolCap{Symbol: c.Symbol, Decimals: c.Decimals, CapBase: capStr}
+		}
+	}
+	for owner, bySym := range s.used {
+		if len(bySym) == 0 {
+			continue
+		}
+		snap.Used[owner] = map[string]string{}
+		for sym, v := range bySym {
+			if v == nil {
+				continue
+			}
+			snap.Used[owner][sym] = v.String()
+		}
+	}
+	data, err := json.MarshalIndent(snap, "", "  ")
+	if err != nil {
+		s.reportErr(fmt.Errorf("marshal transfer-out cap state: %w", err))
+		return
+	}
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		s.reportErr(fmt.Errorf("write transfer-out cap file %s: %w", tmp, err))
+		return
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		s.reportErr(fmt.Errorf("rename transfer-out cap file into place %s: %w", s.path, err))
+	}
+}
+
+func (s *MemoryTransferOutStore) reportErr(err error) {
+	if s.onErr != nil {
+		s.onErr(err)
 	}
 }
 
@@ -87,6 +230,7 @@ func (s *MemoryTransferOutStore) SetCap(owner string, c SymbolCap) {
 		s.caps[owner] = bySym
 	}
 	bySym[c.Symbol] = c
+	s.persistLocked()
 }
 
 // SetUnlimited removes any cap for the owner's symbol (uncapped).
@@ -97,6 +241,7 @@ func (s *MemoryTransferOutStore) SetUnlimited(owner, symbol string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.caps[owner], symbol)
+	s.persistLocked()
 }
 
 // Cap returns the owner's finite cap for the symbol, if one is set.
@@ -144,6 +289,7 @@ func (s *MemoryTransferOutStore) Record(owner, symbol string, amt *big.Int) {
 		cur = big.NewInt(0)
 	}
 	bySym[symbol] = new(big.Int).Add(cur, amt)
+	s.persistLocked()
 }
 
 // Check rejects a transfer-out of amt base units of symbol when it would push
@@ -184,6 +330,10 @@ func (s *MemoryTransferOutStore) rolloverLocked() {
 	for k := range s.used {
 		delete(s.used, k)
 	}
+	// Make the midnight reset durable: a restart later in the new day must not
+	// resurrect yesterday's usage from the file. A read path (Used / Check) can
+	// trigger this, so the write lives here rather than only in the mutators.
+	s.persistLocked()
 }
 
 // baseToHuman renders a base-unit integer as a decimal string with `decimals`

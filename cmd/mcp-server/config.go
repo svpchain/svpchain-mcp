@@ -76,6 +76,15 @@ type Config struct {
 	// own operator, so no EVM RPC or contract address is needed here.
 	FaucetBaseURL string `toml:"faucet_base_url"`
 
+	// TransferOutCapPath persists the per-symbol daily transfer-out caps and
+	// today's usage tally to a JSON file, so neither the caps an agent sets via
+	// set_transfer_out_cap nor the running daily total reset when the server
+	// restarts. Optional: when empty the cap state is in-memory only and resets
+	// on restart (the prior behavior). A relative path is resolved against this
+	// config file's directory (like evm_bridge_routes_path); the file is created
+	// on the first write, so it need not exist at startup.
+	TransferOutCapPath string `toml:"transfer_out_cap_path"`
+
 	// BroadcastMode is informational for whoami. The server always
 	// broadcasts the signed tx the client returns; "local" mode (where
 	// the client broadcasts directly) is documented for a future version.
@@ -161,6 +170,11 @@ func LoadConfig(path string) (*Config, error) {
 	// container, where both files are mounted into /etc/svpchain-mcp).
 	if c.EVMBridgeRoutesPath != "" && !filepath.IsAbs(c.EVMBridgeRoutesPath) {
 		c.EVMBridgeRoutesPath = filepath.Join(filepath.Dir(path), c.EVMBridgeRoutesPath)
+	}
+	// Same config-relative resolution for the transfer-out cap state file, so
+	// "caps.json next to mcp.toml" works regardless of the launch directory.
+	if c.TransferOutCapPath != "" && !filepath.IsAbs(c.TransferOutCapPath) {
+		c.TransferOutCapPath = filepath.Join(filepath.Dir(path), c.TransferOutCapPath)
 	}
 	if err := c.Validate(); err != nil {
 		return nil, err

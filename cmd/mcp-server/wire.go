@@ -201,14 +201,21 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 	}
 	withdrawLedger := limits.NewMemoryLedger(limitsCfg.DailyWithdrawCapUSDC, nil)
 
-	// Per-symbol daily transfer-out cap (svp / usdc / usdv). Caps are parsed
-	// from operator symbols into base units up front so a typo'd symbol or
-	// amount fails startup rather than silently disabling a rail. The ledger
-	// is shared by both the x/bank and EVM rails.
-	// Transfer-out caps are fully agent-controlled: the store starts empty
-	// (every symbol unlimited) and each tenant sets its own per-symbol cap at
-	// runtime via set_transfer_out_cap. Enforced on both the bank and EVM rails.
-	transferOut := limits.NewMemoryTransferOutStore(nil)
+	// Per-symbol daily transfer-out cap (svp / usdc / usdv). The store is shared
+	// by both the x/bank and EVM rails. Transfer-out caps are fully agent-
+	// controlled: the store starts empty (every symbol unlimited) and each
+	// wallet sets its own per-symbol cap at runtime via set_transfer_out_cap.
+	// When transfer_out_cap_path is set, the caps and today's usage tally are
+	// written through to that JSON file and reloaded here, so neither resets on
+	// restart; when unset the store is in-memory only (the prior behavior). A
+	// corrupt cap file fails startup loudly; a write failure after startup is
+	// logged but never aborts the transfer that triggered it.
+	transferOut, err := limits.LoadMemoryTransferOutStore(cfg.TransferOutCapPath, nil, func(err error) {
+		logger.Error("transfer-out cap persistence failed", "error", err)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load transfer-out cap state: %w", err)
+	}
 
 	// v0.3 self-service auth state. Both stores are in-memory + TTL-
 	// bounded; the durable backend lands alongside the durable withdraw

@@ -3,6 +3,8 @@ package limits
 import (
 	"errors"
 	"math/big"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -119,6 +121,111 @@ func TestTransferOutStore_UsedReturnsCopy(t *testing.T) {
 	got := s.Used("t1", "usdc")
 	got.Add(got, bi("999"))
 	require.Equal(t, bi("100"), s.Used("t1", "usdc"))
+}
+
+func TestTransferOutStore_PersistRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "caps.json")
+	clk := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	now := func() time.Time { return clk }
+
+	s1, err := LoadMemoryTransferOutStore(path, now, nil)
+	require.NoError(t, err)
+	s1.SetCap("t1", usdcCap("500000000")) // 500
+	require.NoError(t, s1.Check("t1", "usdc", bi("300000000")))
+	s1.Record("t1", "usdc", bi("300000000"))
+
+	// A second store built from the same file sees the cap and today's usage,
+	// so enforcement continues across a restart rather than refilling.
+	s2, err := LoadMemoryTransferOutStore(path, now, nil)
+	require.NoError(t, err)
+
+	c, ok := s2.Cap("t1", "usdc")
+	require.True(t, ok, "cap should survive a reload")
+	require.Equal(t, bi("500000000"), c.CapBase)
+	require.EqualValues(t, 6, c.Decimals)
+	require.Equal(t, "usdc", c.Symbol)
+
+	require.Equal(t, bi("300000000"), s2.Used("t1", "usdc"))
+	require.NoError(t, s2.Check("t1", "usdc", bi("200000000")))
+	require.Error(t, s2.Check("t1", "usdc", bi("200000001")), "remaining 200 already spent down from the cap")
+}
+
+func TestTransferOutStore_PersistSetUnlimited(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "caps.json")
+	s1, err := LoadMemoryTransferOutStore(path, time.Now, nil)
+	require.NoError(t, err)
+	s1.SetCap("t1", usdcCap("500000000"))
+	s1.SetUnlimited("t1", "usdc")
+
+	s2, err := LoadMemoryTransferOutStore(path, time.Now, nil)
+	require.NoError(t, err)
+	_, ok := s2.Cap("t1", "usdc")
+	require.False(t, ok, "uncapping should survive a reload")
+	require.NoError(t, s2.Check("t1", "usdc", bi("999999999999")))
+}
+
+func TestTransferOutStore_PersistRolloverDurable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "caps.json")
+	clk := time.Date(2026, 5, 28, 23, 59, 0, 0, time.UTC)
+	now := func() time.Time { return clk }
+
+	s1, err := LoadMemoryTransferOutStore(path, now, nil)
+	require.NoError(t, err)
+	s1.SetCap("t1", usdcCap("500000000"))
+	s1.Record("t1", "usdc", bi("500000000"))
+
+	// Cross UTC midnight, then read — the rollover clears usage and the empty
+	// state must be written through, not just held in memory.
+	clk = clk.Add(2 * time.Minute)
+	require.EqualValues(t, 0, s1.Used("t1", "usdc").Int64())
+
+	// A reload after the rollover (now firmly in the new day) must not resurrect
+	// yesterday's usage from the file.
+	s2, err := LoadMemoryTransferOutStore(path, now, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, s2.Used("t1", "usdc").Int64(), "rolled-over usage must not come back from disk")
+	require.NoError(t, s2.Check("t1", "usdc", bi("500000000")))
+}
+
+func TestTransferOutStore_LoadMissingFileIsEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "does-not-exist.json")
+	s, err := LoadMemoryTransferOutStore(path, time.Now, nil)
+	require.NoError(t, err)
+	require.NotNil(t, s)
+	_, ok := s.Cap("t1", "usdc")
+	require.False(t, ok)
+	// First mutation creates the file.
+	s.SetCap("t1", usdcCap("1"))
+	_, statErr := os.Stat(path)
+	require.NoError(t, statErr, "file should be created on first write")
+}
+
+func TestTransferOutStore_LoadCorruptFileErrors(t *testing.T) {
+	t.Run("not json", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "caps.json")
+		require.NoError(t, os.WriteFile(path, []byte("not json"), 0o600))
+		_, err := LoadMemoryTransferOutStore(path, time.Now, nil)
+		require.Error(t, err)
+	})
+
+	t.Run("non-numeric cap_base", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "caps.json")
+		body := `{"day":"2026-05-28","caps":{"t1":{"usdc":{"symbol":"usdc","decimals":6,"cap_base":"abc"}}}}`
+		require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+		_, err := LoadMemoryTransferOutStore(path, time.Now, nil)
+		require.Error(t, err)
+	})
+}
+
+func TestTransferOutStore_NoPathWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	s := NewMemoryTransferOutStore(time.Now)
+	s.SetCap("t1", usdcCap("500000000"))
+	s.Record("t1", "usdc", bi("100"))
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Empty(t, entries, "a non-persistent store must not touch disk")
 }
 
 func TestTransferOutStore_ConcurrentRecord(t *testing.T) {

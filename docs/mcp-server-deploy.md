@@ -125,8 +125,24 @@ transfer) but is **not** a hard guard against a compromised or
 prompt-injected agent, which could call `set_transfer_out_cap` to lift its
 own limit before draining. If you need a boundary an agent cannot cross,
 do not enable the transfer tools (`build_bank_send`, `broadcast_evm_tx`)
-for that tenant. Caps and usage are per-tenant, in-memory, and reset on
-restart / at UTC midnight.
+for that tenant. Caps and usage are keyed by owner wallet and reset at UTC
+midnight.
+
+By default the cap state lives only in memory and is lost on restart (so a
+restart re-opens every wallet's full daily allowance). Set
+`transfer_out_cap_path` to a writable JSON file to persist both the caps and
+today's usage tally across restarts:
+
+```toml
+# Optional. When set, caps + today's usage survive a restart.
+# A relative path resolves next to this config file (like
+# evm_bridge_routes_path). Created on first write; need not exist at startup.
+transfer_out_cap_path = "transfer-out-caps.json"
+```
+
+The server rewrites the file (atomically) after every cap change and every
+successful transfer, and reloads it on boot. A corrupt or hand-edited file
+fails startup loudly rather than silently dropping every cap.
 
 ## Redeploy after a rebuild
 
