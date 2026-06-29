@@ -44,7 +44,8 @@ end-to-end after the localnet has booted.
 
 ```sh
 make localnet-start
-./scripts/local_indexer_stack.sh   # if you want the Indexer endpoints to work
+# If you want the Indexer endpoints to work, start the indexer stack from the
+# external indexer repo and point INDEXER_BASE_URL / indexer_base_url at it.
 ```
 
 The localnet provisions dev keys `dev0` … `dev3` (mnemonics in

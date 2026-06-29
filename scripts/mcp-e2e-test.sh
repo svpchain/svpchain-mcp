@@ -13,8 +13,9 @@
 #   - `svpchaind` on PATH (built from this repo)
 #   - `curl`, `jq` on PATH
 #   - A localnet started via `make localnet-start` (chain at :9090 / :26657)
-#   - Optionally `./scripts/local_indexer_stack.sh` running (else indexer
-#     tools will be skipped with a yellow notice)
+#   - Optionally a local indexer stack running (from the external indexer
+#     repo), reachable at INDEXER_BASE_URL (else indexer tools will be
+#     skipped with a yellow notice)
 #
 # Usage:
 #   ./scripts/mcp-e2e-test.sh                      # default localhost endpoints
