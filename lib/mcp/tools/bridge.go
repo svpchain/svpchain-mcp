@@ -63,15 +63,37 @@ type bridgeLeg struct {
 // ready-to-sign payload plus the resolved route. SourceChainID is the chain the
 // deposit tx runs on (== the payload's stamped chain id); DestChainID is the
 // chain the asset is released on.
+//
+// When the source token is an ERC-20 whose bridge allowance is short, the tool
+// does NOT error — it returns successfully with ApprovalRequired populated and
+// no Payload, so an agent that halts on tool errors can read the structured
+// approval step and proceed. Payload is only present when ApprovalRequired is nil.
 type BridgeDepositOutput struct {
-	Payload       payload.EVMTxPayload `json:"payload"`
-	SourceChainID uint64               `json:"source_chain_id"` // EVM chain id the deposit tx executes on
-	DestChainID   uint64               `json:"dest_chain_id"`   // EVM chain id the asset is released on
-	Symbol        string               `json:"symbol"`          // bridged asset symbol
-	SourceToken   string               `json:"source_token"`    // 0x on the source chain, or "native"
-	TargetToken   string               `json:"target_token"`    // 0x on the dest chain, or "native"
-	Recipient     string               `json:"recipient"`       // 0x recipient on the dest chain
-	AmountBase    string               `json:"amount_base"`     // base units (integer)
+	Payload          payload.EVMTxPayload `json:"payload"`
+	SourceChainID    uint64               `json:"source_chain_id"`             // EVM chain id the deposit tx executes on
+	DestChainID      uint64               `json:"dest_chain_id"`               // EVM chain id the asset is released on
+	Symbol           string               `json:"symbol"`                      // bridged asset symbol
+	SourceToken      string               `json:"source_token"`                // 0x on the source chain, or "native"
+	TargetToken      string               `json:"target_token"`                // 0x on the dest chain, or "native"
+	Recipient        string               `json:"recipient"`                   // 0x recipient on the dest chain
+	AmountBase       string               `json:"amount_base"`                 // base units (integer)
+	ApprovalRequired *BridgeApproval      `json:"approval_required,omitempty"` // non-nil when an erc20 approval must precede this deposit
+}
+
+// BridgeApproval is the structured "approve first" step returned (instead of an
+// error) when the bridge's ERC-20 allowance does not cover the deposit. It is the
+// exact set of arguments to feed build_erc20_approve, plus the tool to retry once
+// the approval is signed and broadcast. ChainID is the chain the approval must be
+// built for — critical for inbound, where it is the foreign source chain, not the
+// home chain build_erc20_approve defaults to.
+type BridgeApproval struct {
+	Tool      string `json:"tool"`       // always "build_erc20_approve"
+	Token     string `json:"token"`      // 0x token to approve
+	Spender   string `json:"spender"`    // 0x bridge contract to approve as spender
+	MinAmount string `json:"min_amount"` // human-units amount the approval must be >=
+	ChainID   uint64 `json:"chain_id"`   // EVM chain id to build the approval on
+	RetryTool string `json:"retry_tool"` // bridge tool to call again after approving
+	Message   string `json:"message"`    // human-readable instruction
 }
 
 // buildBridge is the shared entry path for both bridge tools: authorize, resolve
@@ -121,15 +143,32 @@ func (h *Handlers) assembleBridgeDeposit(
 		data  []byte
 		value *big.Int
 	)
+	base := BridgeDepositOutput{
+		SourceChainID: leg.SrcChainID,
+		DestChainID:   leg.DestChainID,
+		Symbol:        leg.Route.Symbol,
+		SourceToken:   bridgeTokenLabel(leg.Route.SrcToken),
+		TargetToken:   bridgeTokenLabel(leg.Route.TargetToken),
+		Recipient:     recipient.Hex(),
+		AmountBase:    amountBase.String(),
+	}
+
 	if leg.Route.NativeSource() {
 		data, err = leg.Bridge.PackDepositNative(leg.DestChainID, leg.Route.TargetToken, recipient)
 		value = amountBase // the native coin rides as the tx value
 	} else {
 		// deposit() pulls via transferFrom — verify the bridge's allowance on the
-		// source chain covers this deposit before building, so the agent gets a
-		// structured "approve first" instead of an on-chain revert after signing.
-		if err := h.checkBridgeAllowance(ctx, leg.Client, leg.Route.SrcToken, from, leg.Bridge.Contract(), amountBase, amountHuman, toolName, leg.SrcChainID); err != nil {
+		// source chain covers this deposit before building. If it is short we do not
+		// error: we return a successful output carrying the structured "approve
+		// first" step (no payload), so an agent that halts on errors can act on it.
+		var approval *BridgeApproval
+		approval, err = h.checkBridgeAllowance(ctx, leg.Client, leg.Route.SrcToken, from, leg.Bridge.Contract(), amountBase, amountHuman, toolName, leg.SrcChainID)
+		if err != nil {
 			return nil, err
+		}
+		if approval != nil {
+			base.ApprovalRequired = approval
+			return &base, nil
 		}
 		data, err = leg.Bridge.PackDeposit(leg.Route.SrcToken, amountBase, leg.DestChainID, leg.Route.TargetToken, recipient)
 	}
@@ -153,16 +192,8 @@ func (h *Handlers) assembleBridgeDeposit(
 		return nil, err
 	}
 
-	return &BridgeDepositOutput{
-		Payload:       *p,
-		SourceChainID: leg.SrcChainID,
-		DestChainID:   leg.DestChainID,
-		Symbol:        leg.Route.Symbol,
-		SourceToken:   bridgeTokenLabel(leg.Route.SrcToken),
-		TargetToken:   bridgeTokenLabel(leg.Route.TargetToken),
-		Recipient:     recipient.Hex(),
-		AmountBase:    amountBase.String(),
-	}, nil
+	base.Payload = *p
+	return &base, nil
 }
 
 // bridgeParties resolves the deposit sender (the tenant owner's 0x address, which
@@ -306,32 +337,43 @@ func (h *Handlers) BuildBridgeDepositInbound(
 // -- shared helpers ----------------------------------------------------
 
 // checkBridgeAllowance reads the bridge's allowance on the source token (via the
-// given chain's client) and returns a user-facing "approve first" error pointing
-// at retryTool if it does not cover amount. srcChainID is the chain the deposit
-// (and thus the approval) lives on; it is surfaced as build_erc20_approve's
-// chain_id so the approval is built/signed for the right chain — critical for
-// inbound, where the approval must target the foreign chain, not the home one.
+// given chain's client) and returns a structured "approve first" step pointing at
+// retryTool if it does not cover amount (nil when the allowance is sufficient).
+// A short allowance is NOT an error — only a genuine RPC/decode failure is — so
+// callers can surface the approval step in a successful result. srcChainID is the
+// chain the deposit (and thus the approval) lives on; it is surfaced as
+// build_erc20_approve's chain_id so the approval is built/signed for the right
+// chain — critical for inbound, where the approval must target the foreign chain,
+// not the home one.
 func (h *Handlers) checkBridgeAllowance(
 	ctx context.Context, client chain.EVMClient, token, owner, bridgeAddr common.Address, amount *big.Int, amountHuman, retryTool string, srcChainID uint64,
-) error {
+) (*BridgeApproval, error) {
 	data, err := builder.PackERC20Allowance(owner, bridgeAddr)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	out, err := evmCallOn(ctx, client, token, data)
 	if err != nil {
-		return fmt.Errorf("read allowance for %s: %w", token.Hex(), err)
+		return nil, fmt.Errorf("read allowance for %s: %w", token.Hex(), err)
 	}
 	allowance, err := builder.UnpackERC20Allowance(out)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if allowance.Cmp(amount) < 0 {
-		return userErrf(
-			"bridge allowance for %s is insufficient — call build_erc20_approve (token %s, spender %s, amount >= %s, chain_id %d) first, then retry %s",
-			token.Hex(), token.Hex(), bridgeAddr.Hex(), amountHuman, srcChainID, retryTool)
+		return &BridgeApproval{
+			Tool:      "build_erc20_approve",
+			Token:     token.Hex(),
+			Spender:   bridgeAddr.Hex(),
+			MinAmount: amountHuman,
+			ChainID:   srcChainID,
+			RetryTool: retryTool,
+			Message: fmt.Sprintf(
+				"bridge allowance for %s is insufficient — call build_erc20_approve (token %s, spender %s, amount >= %s, chain_id %d) first, then retry %s",
+				token.Hex(), token.Hex(), bridgeAddr.Hex(), amountHuman, srcChainID, retryTool),
+		}, nil
 	}
-	return nil
+	return nil, nil
 }
 
 // bridgeTokenLabel renders a registry token for output: "native" for the zero

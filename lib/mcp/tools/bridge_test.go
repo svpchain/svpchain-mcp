@@ -139,19 +139,26 @@ func TestBuildBridgeDepositInbound_AllowanceShort(t *testing.T) {
 	}
 	h, ctx := inboundHandlers(t, mocks, map[uint64]string{421614: arbBridgeAddr})
 
-	_, _, err := h.BuildBridgeDepositInbound(ctx, nil, BuildBridgeDepositInboundInput{
+	_, out, err := h.BuildBridgeDepositInbound(ctx, nil, BuildBridgeDepositInboundInput{
 		SourceChain: "421614",
 		Token:       "SVP",
 		Amount:      "1.0",
 		ClientID:    "cid-2",
 	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "build_erc20_approve")
+	// A short allowance is NOT an error: the tool returns successfully with the
+	// structured approval step and no payload, so an agent that halts on tool
+	// errors can read it and proceed.
+	require.NoError(t, err)
+	require.Empty(t, out.Payload.EVMChainID) // no ready-to-sign payload when approval is pending
+	require.NotNil(t, out.ApprovalRequired)
+	require.Equal(t, "build_erc20_approve", out.ApprovalRequired.Tool)
 	// The spender called out is the FOREIGN bridge, not the home one.
-	require.Contains(t, err.Error(), common.HexToAddress(arbBridgeAddr).Hex())
+	require.Equal(t, common.HexToAddress(arbBridgeAddr).Hex(), out.ApprovalRequired.Spender)
 	// And it names the FOREIGN chain id so the approval is built for the right
 	// chain (the bug fix: build_erc20_approve defaults to the home chain).
-	require.Contains(t, err.Error(), "chain_id 421614")
+	require.Equal(t, uint64(421614), out.ApprovalRequired.ChainID)
+	require.Equal(t, "build_bridge_deposit_inbound", out.ApprovalRequired.RetryTool)
+	require.Contains(t, out.ApprovalRequired.Message, "build_erc20_approve")
 }
 
 func TestBuildBridgeDepositInbound_Native(t *testing.T) {
