@@ -2,17 +2,18 @@ package indexer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 )
 
-// TransfersResponse wraps Comlink's TransferResponse.
+// TransfersResponse wraps Comlink's TransferResponse. Transfers are passed
+// through as untyped objects (map[string]any) so the MCP output schema is a
+// valid object schema — see CandlesResponse.
 type TransfersResponse struct {
-	Transfers    []json.RawMessage `json:"transfers"`
-	PageSize     uint32            `json:"pageSize,omitempty"`
-	TotalResults uint32            `json:"totalResults,omitempty"`
-	Offset       uint32            `json:"offset,omitempty"`
+	Transfers    []map[string]any `json:"transfers"`
+	PageSize     uint32           `json:"pageSize,omitempty"`
+	TotalResults uint32           `json:"totalResults,omitempty"`
+	Offset       uint32           `json:"offset,omitempty"`
 }
 
 // GetTransfers fetches GET /v4/transfers?address=&subaccountNumber=

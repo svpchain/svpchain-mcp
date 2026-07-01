@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -168,7 +167,7 @@ func (h *Handlers) GetPnl(
 	if err != nil {
 		if errors.Is(err, indexer.ErrNotFound) {
 			return nil, GetPnlOutput{Pnl: indexer.PnlResponse{
-				HistoricalPnl: []json.RawMessage{},
+				HistoricalPnl: []map[string]any{},
 			}}, nil
 		}
 		return nil, GetPnlOutput{}, err
@@ -200,7 +199,7 @@ func (h *Handlers) GetHistoricalPnl(
 	if err != nil {
 		if errors.Is(err, indexer.ErrNotFound) {
 			return nil, GetHistoricalPnlOutput{HistoricalPnl: indexer.HistoricalPnlResponse{
-				HistoricalPnl: []json.RawMessage{},
+				HistoricalPnl: []map[string]any{},
 			}}, nil
 		}
 		return nil, GetHistoricalPnlOutput{}, err
@@ -232,7 +231,7 @@ func (h *Handlers) GetFundingPayments(
 	if err != nil {
 		if errors.Is(err, indexer.ErrNotFound) {
 			return nil, GetFundingPaymentsOutput{FundingPayments: indexer.FundingPaymentsResponse{
-				FundingPayments: []json.RawMessage{},
+				FundingPayments: []map[string]any{},
 			}}, nil
 		}
 		return nil, GetFundingPaymentsOutput{}, err

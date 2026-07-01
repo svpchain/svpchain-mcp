@@ -2,22 +2,23 @@ package indexer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 )
 
-// PnlResponse wraps Comlink's GET /v4/pnl response.
+// PnlResponse wraps Comlink's GET /v4/pnl response. Entries are passed through
+// as untyped objects (map[string]any) so the MCP output schema is a valid
+// object schema — see CandlesResponse.
 type PnlResponse struct {
-	HistoricalPnl []json.RawMessage `json:"historicalPnl"`
+	HistoricalPnl []map[string]any `json:"historicalPnl"`
 }
 
 // HistoricalPnlResponse wraps Comlink's HistoricalPnlResponse (paginated).
 type HistoricalPnlResponse struct {
-	HistoricalPnl []json.RawMessage `json:"historicalPnl"`
-	PageSize      uint32            `json:"pageSize,omitempty"`
-	TotalResults  uint32            `json:"totalResults,omitempty"`
-	Offset        uint32            `json:"offset,omitempty"`
+	HistoricalPnl []map[string]any `json:"historicalPnl"`
+	PageSize      uint32           `json:"pageSize,omitempty"`
+	TotalResults  uint32           `json:"totalResults,omitempty"`
+	Offset        uint32           `json:"offset,omitempty"`
 }
 
 // GetPnl fetches GET /v4/pnl?address=&subaccountNumber=

@@ -2,17 +2,18 @@ package indexer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 )
 
-// TradesResponse mirrors Comlink's TradeResponse.
+// TradesResponse mirrors Comlink's TradeResponse. Trades are passed through as
+// untyped objects (map[string]any) so the MCP output schema is a valid object
+// schema — see CandlesResponse.
 type TradesResponse struct {
-	Trades       []json.RawMessage `json:"trades"`
-	PageSize     uint32            `json:"pageSize,omitempty"`
-	TotalResults uint32            `json:"totalResults,omitempty"`
-	Offset       uint32            `json:"offset,omitempty"`
+	Trades       []map[string]any `json:"trades"`
+	PageSize     uint32           `json:"pageSize,omitempty"`
+	TotalResults uint32           `json:"totalResults,omitempty"`
+	Offset       uint32           `json:"offset,omitempty"`
 }
 
 // GetTrades fetches GET /v4/trades/perpetualMarket/:ticker.

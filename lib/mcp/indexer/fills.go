@@ -2,17 +2,18 @@ package indexer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 )
 
-// FillsResponse wraps Comlink's FillResponse.
+// FillsResponse wraps Comlink's FillResponse. Fills are passed through as
+// untyped objects (map[string]any) so the MCP output schema is a valid object
+// schema — see CandlesResponse.
 type FillsResponse struct {
-	Fills        []json.RawMessage `json:"fills"`
-	PageSize     uint32            `json:"pageSize,omitempty"`
-	TotalResults uint32            `json:"totalResults,omitempty"`
-	Offset       uint32            `json:"offset,omitempty"`
+	Fills        []map[string]any `json:"fills"`
+	PageSize     uint32           `json:"pageSize,omitempty"`
+	TotalResults uint32           `json:"totalResults,omitempty"`
+	Offset       uint32           `json:"offset,omitempty"`
 }
 
 // GetFills fetches GET /v4/fills?address=&subaccountNumber=&market=

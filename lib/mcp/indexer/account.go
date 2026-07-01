@@ -2,25 +2,26 @@ package indexer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 )
 
-// Subaccount mirrors Comlink's SubaccountResponseObject. Positions maps
-// are kept as json.RawMessage in v0.1 — MCP tools pass them through to
-// the agent as-is; v0.2 may type them when the policy engine needs to
-// inspect positions for risk caps.
+// Subaccount mirrors Comlink's SubaccountResponseObject. The position maps are
+// passed through as untyped objects (map[string]any) — MCP tools hand them to
+// the agent as-is; v0.2 may type them when the policy engine needs to inspect
+// positions for risk caps. map[string]any (not json.RawMessage or a bare any)
+// is required so the MCP output schema is a valid object schema — see
+// CandlesResponse for the full rationale.
 type Subaccount struct {
-	Address                    string          `json:"address"`
-	SubaccountNumber           int32           `json:"subaccountNumber"`
-	Equity                     string          `json:"equity"`
-	FreeCollateral             string          `json:"freeCollateral"`
-	OpenPerpetualPositions     json.RawMessage `json:"openPerpetualPositions"`
-	AssetPositions             json.RawMessage `json:"assetPositions"`
-	MarginEnabled              bool            `json:"marginEnabled"`
-	UpdatedAtHeight            string          `json:"updatedAtHeight"`
-	LatestProcessedBlockHeight string          `json:"latestProcessedBlockHeight"`
+	Address                    string         `json:"address"`
+	SubaccountNumber           int32          `json:"subaccountNumber"`
+	Equity                     string         `json:"equity"`
+	FreeCollateral             string         `json:"freeCollateral"`
+	OpenPerpetualPositions     map[string]any `json:"openPerpetualPositions"`
+	AssetPositions             map[string]any `json:"assetPositions"`
+	MarginEnabled              bool           `json:"marginEnabled"`
+	UpdatedAtHeight            string         `json:"updatedAtHeight"`
+	LatestProcessedBlockHeight string         `json:"latestProcessedBlockHeight"`
 }
 
 // GetSubaccount fetches GET /v4/addresses/:address/subaccountNumber/:n.

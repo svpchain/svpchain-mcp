@@ -2,15 +2,16 @@ package indexer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 )
 
-// Order is one Comlink OrderResponseObject. v0.2.1 keeps it as raw JSON —
-// the order shape has many optional fields and the agent can read them
-// verbatim. v0.2.2 will type the subset the builder needs.
-type Order = json.RawMessage
+// Order is one Comlink OrderResponseObject. v0.2.1 keeps it untyped — the order
+// shape has many optional fields and the agent can read them as-is; v0.2.2 will
+// type the subset the builder needs. It is map[string]any (not json.RawMessage
+// or a bare any) so the MCP output schema is a valid object schema — see
+// CandlesResponse.
+type Order = map[string]any
 
 // GetOrders fetches GET /v4/orders?address=&subaccountNumber=&... Returns
 // a JSON array of orders (not a wrapped object — see orders-controller.ts:216,218).

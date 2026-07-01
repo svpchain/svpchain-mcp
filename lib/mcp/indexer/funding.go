@@ -2,19 +2,20 @@ package indexer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 )
 
-// HistoricalFundingResponse wraps Comlink's HistoricalFundingResponse.
+// HistoricalFundingResponse wraps Comlink's HistoricalFundingResponse. Entries
+// are passed through as untyped objects (map[string]any) so the MCP output
+// schema is a valid object schema — see CandlesResponse.
 type HistoricalFundingResponse struct {
-	HistoricalFunding []json.RawMessage `json:"historicalFunding"`
+	HistoricalFunding []map[string]any `json:"historicalFunding"`
 }
 
 // FundingPaymentsResponse wraps Comlink's FundingPaymentResponse.
 type FundingPaymentsResponse struct {
-	FundingPayments []json.RawMessage `json:"fundingPayments"`
+	FundingPayments []map[string]any `json:"fundingPayments"`
 }
 
 // GetHistoricalFunding fetches GET /v4/historicalFunding/:ticker.

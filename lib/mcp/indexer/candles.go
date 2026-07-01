@@ -2,16 +2,27 @@ package indexer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 )
 
 // CandlesResponse wraps Comlink's GET /v4/candles/perpetualMarkets/:ticker
-// response. Individual candles are kept as json.RawMessage so the agent
-// sees Comlink's schema verbatim and we don't have to track field drift.
+// response. Individual candles are passed through as untyped objects
+// (map[string]any) so the agent sees Comlink's fields as-is and we don't have
+// to track field drift.
+//
+// The element type must be map[string]any, not json.RawMessage or a bare any:
+//   - json.RawMessage ([]byte) reflects to a "type: array" schema, which the
+//     go-sdk then rejects real object candles against (server-side output
+//     validation fails).
+//   - a bare any reflects to the boolean schema `true`, which the go-sdk emits
+//     at the property/items position; strict MCP clients reject a boolean there
+//     ("Invalid input") and refuse the whole tools/list.
+//
+// map[string]any reflects to {"type":"object","additionalProperties":true} — a
+// valid schema object that still accepts any candle shape.
 type CandlesResponse struct {
-	Candles []json.RawMessage `json:"candles"`
+	Candles []map[string]any `json:"candles"`
 }
 
 // GetCandlesArgs are the query params accepted by Comlink (all optional).

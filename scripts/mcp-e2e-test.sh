@@ -406,7 +406,7 @@ pass "bearer obtained (24h TTL); session is bound for subsequent calls"
 # lib/mcp/tools/registry.go. Current tail: market data + account + trading +
 # funds + caps + auth + faucet + the EVM family (engine, UniswapV2 swaps, generic
 # ERC-20/ERC-721 builds, and SVPBridge build_bridge_deposit).
-EXPECTED_TOOLS="${EXPECTED_TOOLS:-51}"
+EXPECTED_TOOLS="${EXPECTED_TOOLS:-52}"
 step "tools/list (expecting ${EXPECTED_TOOLS} tools)"
 LIST=$(mcp_call 1 "tools/list")
 COUNT=$(jq -r '.result.tools | length' <<<"$LIST")
