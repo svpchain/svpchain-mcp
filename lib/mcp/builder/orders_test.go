@@ -2,9 +2,6 @@ package builder_test
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -14,56 +11,44 @@ import (
 	// testOwner, newTestAsm, and the app/config blank-import live in
 	// testutil_test.go (same package).
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
 	clobtypes "github.com/dydxprotocol/v4-chain/protocol/x/clob/types"
+	perptypes "github.com/dydxprotocol/v4-chain/protocol/x/perpetuals/types"
 )
 
-// stubClobQuery returns a fixed set of ClobPair ids — needed so the cache's
-// chain/indexer join keeps our seeded BTC-USD entry.
-type stubClobQuery struct{ ids []uint32 }
+// stubChain implements both chain.ClobQueryClient and
+// chain.PerpetualsQueryClient off fixed in-memory slices, so the markets
+// cache can be driven without a live chain.
+type stubChain struct {
+	pairs []clobtypes.ClobPair
+	perps []perptypes.Perpetual
+}
 
-func (s *stubClobQuery) ClobPairAll(_ context.Context) ([]clobtypes.ClobPair, error) {
-	out := make([]clobtypes.ClobPair, 0, len(s.ids))
-	for _, id := range s.ids {
-		out = append(out, clobtypes.ClobPair{Id: id})
-	}
-	return out, nil
+func (s *stubChain) ClobPairAll(_ context.Context) ([]clobtypes.ClobPair, error) {
+	return s.pairs, nil
+}
+
+func (s *stubChain) AllPerpetuals(_ context.Context) ([]perptypes.Perpetual, error) {
+	return s.perps, nil
 }
 
 func newBtcCache(t *testing.T) *markets.Cache {
 	t.Helper()
-	mkt := map[string]any{
-		"clobPairId":                "0",
-		"ticker":                    "BTC-USD",
-		"status":                    "ACTIVE",
-		"oraclePrice":               "65000.00",
-		"priceChange24H":            "0",
-		"volume24H":                 "0",
-		"trades24H":                 0,
-		"nextFundingRate":           "0",
-		"initialMarginFraction":     "0.05",
-		"maintenanceMarginFraction": "0.03",
-		"openInterest":              "0",
-		"atomicResolution":          -10,
-		"quantumConversionExponent": -9,
-		"tickSize":                  "0.01",
-		"stepSize":                  "0.000001",
-		"stepBaseQuantums":          1_000_000,
-		"subticksPerTick":           1_000,
-		"marketType":                "CROSS",
-		"baseOpenInterest":          "0",
+	stub := &stubChain{
+		pairs: []clobtypes.ClobPair{{
+			Id: 0,
+			Metadata: &clobtypes.ClobPair_PerpetualClobMetadata{
+				PerpetualClobMetadata: &clobtypes.PerpetualClobMetadata{PerpetualId: 0},
+			},
+			StepBaseQuantums:          1_000_000,
+			SubticksPerTick:           1_000,
+			QuantumConversionExponent: -9,
+		}},
+		perps: []perptypes.Perpetual{{
+			Params: perptypes.PerpetualParams{Id: 0, Ticker: "BTC-USD", AtomicResolution: -10},
+		}},
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"markets": map[string]any{"BTC-USD": mkt},
-		})
-	}))
-	t.Cleanup(srv.Close)
-
-	idx := indexer.NewClient(srv.URL, indexer.Options{})
-	c := markets.NewCache(idx, &stubClobQuery{ids: []uint32{0}}, time.Hour, log.NewNopLogger())
+	c := markets.NewCache(stub, stub, time.Hour, log.NewNopLogger())
 	require.NoError(t, c.Refresh(context.Background()))
 	return c
 }

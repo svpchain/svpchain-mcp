@@ -3,21 +3,20 @@ package markets
 import (
 	"context"
 	"fmt"
-	"sort"
-	"strconv"
+	"slices"
 	"sync"
 	"time"
 
 	"cosmossdk.io/log"
 
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
 )
 
 // MarketMeta is the per-market constant set that every build_* tool path
 // needs: clobPairId for the on-chain Order field, plus the conversion
 // constants for the units package to translate human size/price into
-// quantums/subticks. Pulled from the indexer's PerpetualMarketResponseObject.
+// quantums/subticks. Assembled by joining the chain's ClobPair and
+// Perpetual records.
 type MarketMeta struct {
 	Ticker                    string
 	ClobPairID                uint32
@@ -31,19 +30,19 @@ type MarketMeta struct {
 // keyed by ticker. Reads (ResolveTicker) are lock-free in the common
 // case via sync.RWMutex.
 //
-// Refresh joins two sources:
-//   - chain.ClobQueryClient.ClobPairAll — authoritative set of valid
-//     clob_pair_id values. Any indexer entry whose clob_pair_id is not in
-//     this set is dropped (with a logged warning), so the MCP server is
-//     resilient to indexer ticker→clobPairId drift.
-//   - indexer.Client.ListPerpetualMarkets — human ticker strings + the
-//     unit-conversion constants (atomicResolution, stepBaseQuantums,
-//     subticksPerTick, quantumConversionExponent). The chain has these
-//     too, but they're spread across clob/perpetuals/prices and need
-//     more queries; the indexer pre-joins them.
+// Refresh sources everything from the chain — no off-chain indexer
+// dependency — by joining two authoritative queries:
+//   - chain.ClobQueryClient.ClobPairAll — the set of tradable ClobPairs,
+//     carrying clob_pair_id, step_base_quantums, subticks_per_tick,
+//     quantum_conversion_exponent, and the perpetual_id link.
+//   - chain.PerpetualsQueryClient.AllPerpetuals — the human ticker string
+//     and atomic_resolution, keyed by perpetual id.
+//
+// Every build_* tool resolves a ticker through this cache, so keeping it
+// chain-only means the write path works with no indexer running.
 type Cache struct {
-	indexer      *indexer.Client
 	clobQuery    chain.ClobQueryClient
+	perpQuery    chain.PerpetualsQueryClient
 	refreshEvery time.Duration
 	logger       log.Logger
 
@@ -52,16 +51,16 @@ type Cache struct {
 }
 
 // NewCache returns a Cache that refreshes every `refresh` (defaults to 60s
-// when zero). clobQuery may be nil for tests that exercise only the
-// indexer path; production callers (cmd/mcp-server/wire.go) always pass
-// a real chain client.
-func NewCache(idx *indexer.Client, clobQuery chain.ClobQueryClient, refresh time.Duration, logger log.Logger) *Cache {
+// when zero). clobQuery and perpQuery must both be non-nil; production
+// callers (cmd/mcp-server/wire.go) pass real chain clients and tests pass
+// inline stubs.
+func NewCache(clobQuery chain.ClobQueryClient, perpQuery chain.PerpetualsQueryClient, refresh time.Duration, logger log.Logger) *Cache {
 	if refresh == 0 {
 		refresh = 60 * time.Second
 	}
 	return &Cache{
-		indexer:      idx,
 		clobQuery:    clobQuery,
+		perpQuery:    perpQuery,
 		refreshEvery: refresh,
 		logger:       logger,
 		byTicker:     make(map[string]MarketMeta),
@@ -90,68 +89,71 @@ func (c *Cache) Run(ctx context.Context) error {
 	}
 }
 
-// Refresh joins the chain's authoritative ClobPair set with the indexer's
-// ticker + conversion metadata, then atomically swaps the in-memory table.
+// Refresh joins the chain's ClobPair set with its Perpetual records to
+// build the ticker→MarketMeta table, then atomically swaps it in.
 //
-// Entries the indexer knows about but the chain does not (stale indexer
-// state — what bit us in the first end-to-end run) are dropped, with the
-// dropped tickers logged for diagnostics.
+// ClobPairs whose perpetual_id has no matching Perpetual (and non-perpetual
+// ClobPairs, which carry no ticker) are dropped, with the dropped
+// clob_pair_ids logged for diagnostics.
 func (c *Cache) Refresh(ctx context.Context) error {
-	// Source of truth for valid clob_pair_id values. nil clobQuery is
-	// permitted for tests; we just skip the filter in that mode.
-	var validIDs map[uint32]struct{}
-	if c.clobQuery != nil {
-		chainPairs, err := c.clobQuery.ClobPairAll(ctx)
-		if err != nil {
-			return fmt.Errorf("clob.Query/ClobPairAll: %w", err)
-		}
-		validIDs = make(map[uint32]struct{}, len(chainPairs))
-		for _, p := range chainPairs {
-			validIDs[p.Id] = struct{}{}
-		}
-	}
-
-	resp, err := c.indexer.ListPerpetualMarkets(ctx)
+	clobPairs, err := c.clobQuery.ClobPairAll(ctx)
 	if err != nil {
-		return fmt.Errorf("ListPerpetualMarkets: %w", err)
+		return fmt.Errorf("clob.Query/ClobPairAll: %w", err)
+	}
+	perps, err := c.perpQuery.AllPerpetuals(ctx)
+	if err != nil {
+		return fmt.Errorf("perpetuals.Query/AllPerpetuals: %w", err)
 	}
 
-	next := make(map[string]MarketMeta, len(resp.Markets))
-	var dropped []string
-	for ticker, m := range resp.Markets {
-		// ClobPairID is a uint32 on-chain but the indexer returns it as a
-		// string for JS-precision safety.
-		clobPairID, err := strconv.ParseUint(m.ClobPairID, 10, 32)
-		if err != nil {
-			c.logger.Error("market has invalid clobPairId; skipping",
-				"ticker", ticker, "value", m.ClobPairID)
+	// Index perpetuals by id so each ClobPair can pull its ticker + atomic
+	// resolution via PerpetualClobMetadata.PerpetualId.
+	perpByID := make(map[uint32]perpMeta, len(perps))
+	for _, p := range perps {
+		perpByID[p.Params.Id] = perpMeta{
+			ticker:           p.Params.Ticker,
+			atomicResolution: p.Params.AtomicResolution,
+		}
+	}
+
+	next := make(map[string]MarketMeta, len(clobPairs))
+	var dropped []uint32
+	for _, cp := range clobPairs {
+		meta := cp.GetPerpetualClobMetadata()
+		if meta == nil {
+			// Non-perpetual (e.g. spot) ClobPair — no ticker to resolve.
+			dropped = append(dropped, cp.Id)
 			continue
 		}
-		if validIDs != nil {
-			if _, ok := validIDs[uint32(clobPairID)]; !ok {
-				dropped = append(dropped, ticker)
-				continue
-			}
+		perp, ok := perpByID[meta.PerpetualId]
+		if !ok {
+			dropped = append(dropped, cp.Id)
+			continue
 		}
-		next[ticker] = MarketMeta{
-			Ticker:                    ticker,
-			ClobPairID:                uint32(clobPairID),
-			AtomicResolution:          m.AtomicResolution,
-			QuantumConversionExponent: m.QuantumConversionExponent,
-			StepBaseQuantums:          m.StepBaseQuantums,
-			SubticksPerTick:           m.SubticksPerTick,
+		next[perp.ticker] = MarketMeta{
+			Ticker:                    perp.ticker,
+			ClobPairID:                cp.Id,
+			AtomicResolution:          perp.atomicResolution,
+			QuantumConversionExponent: cp.QuantumConversionExponent,
+			StepBaseQuantums:          cp.StepBaseQuantums,
+			SubticksPerTick:           cp.SubticksPerTick,
 		}
 	}
 	if len(dropped) > 0 {
-		sort.Strings(dropped) // stable log output
-		c.logger.Info("markets cache: dropped indexer entries not present on chain",
-			"tickers", dropped)
+		slices.Sort(dropped) // stable log output
+		c.logger.Info("markets cache: dropped clob pairs with no resolvable perpetual",
+			"clob_pair_ids", dropped)
 	}
 
 	c.mu.Lock()
 	c.byTicker = next
 	c.mu.Unlock()
 	return nil
+}
+
+// perpMeta is the slice of a Perpetual the cache joins onto its ClobPair.
+type perpMeta struct {
+	ticker           string
+	atomicResolution int32
 }
 
 // ResolveTicker returns the cached MarketMeta for ticker, if known. It is

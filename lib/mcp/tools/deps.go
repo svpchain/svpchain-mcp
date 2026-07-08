@@ -20,6 +20,7 @@ type ChainDeps struct {
 	Account         chain.AccountClient
 	Broadcast       chain.BroadcastClient
 	ClobQuery       chain.ClobQueryClient
+	PerpetualsQuery chain.PerpetualsQueryClient
 	SubaccountQuery chain.SubaccountQueryClient
 	BankQuery       chain.BankQueryClient
 	CometBft        chain.CometBftClient

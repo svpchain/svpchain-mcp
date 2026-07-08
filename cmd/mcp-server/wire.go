@@ -61,6 +61,7 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 		Account:         chain.NewAccountClient(grpcConn, encCfg.InterfaceRegistry),
 		Broadcast:       chain.NewBroadcastClient(grpcConn),
 		ClobQuery:       chain.NewClobQueryClient(grpcConn),
+		PerpetualsQuery: chain.NewPerpetualsQueryClient(grpcConn),
 		SubaccountQuery: chain.NewSubaccountQueryClient(grpcConn),
 		BankQuery:       chain.NewBankQueryClient(grpcConn),
 	}
@@ -181,9 +182,9 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 		faucetClient = faucet.NewClient(cfg.FaucetBaseURL, faucet.Options{})
 	}
 
-	// Indexer + markets cache.
+	// Indexer client (read-catalog tools only) + chain-sourced markets cache.
 	idx := indexer.NewClient(cfg.IndexerBaseURL, indexer.Options{})
-	mkts := markets.NewCache(idx, chainDeps.ClobQuery, time.Duration(cfg.Cache.MarketsRefresh), logger)
+	mkts := markets.NewCache(chainDeps.ClobQuery, chainDeps.PerpetualsQuery, time.Duration(cfg.Cache.MarketsRefresh), logger)
 
 	// v0.3 dropped the static [[tenants]] table — every tenant is
 	// auto-issued at runtime via the auth_challenge → auth_verify flow,
