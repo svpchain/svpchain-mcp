@@ -37,6 +37,7 @@ func (m *mockEVMClient) EstimateGas(_ context.Context, msg ethereum.CallMsg) (ui
 func (m *mockEVMClient) SuggestGasTipCap(context.Context) (*big.Int, error) { return m.tip, nil }
 func (m *mockEVMClient) BaseFee(context.Context) (*big.Int, error)          { return m.baseFee, nil }
 func (m *mockEVMClient) ChainID(context.Context) (*big.Int, error)          { return m.chainID, nil }
+func (m *mockEVMClient) BlockNumber(context.Context) (uint64, error)        { return 0, nil }
 func (m *mockEVMClient) CallContract(context.Context, ethereum.CallMsg) ([]byte, error) {
 	return nil, nil
 }

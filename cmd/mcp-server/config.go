@@ -48,6 +48,14 @@ type Config struct {
 	// refuses and the rest of the EVM family is unaffected.
 	EVMOracleAddr string `toml:"evm_oracle_addr"`
 
+	// EVMLendoraComptrollerAddr binds the lendora_* money-market tools to a
+	// Lendora (Compound V2 fork) Comptroller deployment. It is the singleton
+	// Comptroller on this chain (the enter/exit-market target); individual CErc20
+	// markets are passed as per-call tool arguments. Optional and must be a valid
+	// 0x address when set; setting it also requires evm_rpc_url. When unset the
+	// lendora tools refuse and the rest of the EVM family is unaffected.
+	EVMLendoraComptrollerAddr string `toml:"evm_lendora_comptroller_addr"`
+
 	// EVMBridgeAddr / EVMBridgeRoutesPath / EVMBridgeSourceChainID bind
 	// build_bridge_deposit to an SVPBridge deployment. EVMBridgeAddr is the
 	// bridge contract on this chain (the deposit target); EVMBridgeRoutesPath is
@@ -211,6 +219,9 @@ func (c *Config) Validate() error {
 	if err := c.validateOracle(); err != nil {
 		return err
 	}
+	if err := c.validateLendora(); err != nil {
+		return err
+	}
 	if err := c.validateBridge(); err != nil {
 		return err
 	}
@@ -298,6 +309,23 @@ func (c *Config) validateOracle() error {
 	}
 	if c.EVMRPCURL == "" {
 		return fmt.Errorf("evm_rpc_url is required when evm_oracle_addr is set")
+	}
+	return nil
+}
+
+// validateLendora enforces the Lendora invariant: the Comptroller address must
+// be valid hex when set, and the family requires an EVM RPC endpoint (the tools
+// read decimals/underlying/allowance via eth_call and submit over
+// eth_sendRawTransaction). Independent of the other EVM addresses.
+func (c *Config) validateLendora() error {
+	if c.EVMLendoraComptrollerAddr == "" {
+		return nil
+	}
+	if !common.IsHexAddress(c.EVMLendoraComptrollerAddr) {
+		return fmt.Errorf("evm_lendora_comptroller_addr %q is not a valid 0x address", c.EVMLendoraComptrollerAddr)
+	}
+	if c.EVMRPCURL == "" {
+		return fmt.Errorf("evm_rpc_url is required when evm_lendora_comptroller_addr is set")
 	}
 	return nil
 }

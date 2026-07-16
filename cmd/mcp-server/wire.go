@@ -17,6 +17,7 @@ import (
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/faucet"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/lendora"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/limits"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/logging"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
@@ -76,6 +77,7 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 	// evm_rpc_url is configured. Without it, EVM tools refuse at call time
 	// (Deps.EVM.Assembler stays nil) and non-EVM deployments are unaffected.
 	var evmDeps tools.EVMDeps
+	var lendoraMkts *lendora.Cache
 	if cfg.EVMRPCURL != "" {
 		evmClient, err := chain.NewEVMClient(ctx, cfg.EVMRPCURL)
 		if err != nil {
@@ -110,6 +112,22 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 				return nil, fmt.Errorf("oracle feed binding: %w", err)
 			}
 			evmDeps.Oracle = oracle
+		}
+		// Lendora is wired independently of the other bindings: it only needs
+		// evm_lendora_comptroller_addr (config validation guarantees valid hex +
+		// evm_rpc_url). Without it Lendora stays nil and the lendora_* tools
+		// refuse (requireLendora).
+		if cfg.EVMLendoraComptrollerAddr != "" {
+			lend, err := builder.NewLendora(common.HexToAddress(cfg.EVMLendoraComptrollerAddr))
+			if err != nil {
+				grpcConn.Close()
+				return nil, fmt.Errorf("lendora binding: %w", err)
+			}
+			evmDeps.Lendora = lend
+			// The lendora markets cache resolves asset symbols/addresses to market
+			// metadata over EVM; it shares the perp cache's refresh interval and is
+			// run under the same lifecycle in server.go.
+			lendoraMkts = lendora.NewCache(evmClient, lend, time.Duration(cfg.Cache.MarketsRefresh), logger)
 		}
 		// The bridge is wired only when its address, route file, and source chain
 		// id are configured (config validation guarantees all-or-nothing + valid
@@ -237,6 +255,7 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 		Chain:             chainDeps,
 		Indexer:           idx,
 		Markets:           mkts,
+		LendoraMarkets:    lendoraMkts,
 		Builder:           builder.NewAssembler(cfg.ChainID, cfg.Fee.Denom, cfg.Fee.Amount, cfg.Fee.GasLimit),
 		Faucet:            faucetClient,
 		EVM:               evmDeps,
@@ -257,5 +276,5 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 	}
 	handlers := tools.New(cfg.ChainID, deps)
 
-	return NewServer(cfg, handlers, grpcConn, mkts, logger, dynamicTenants, sessionBearers), nil
+	return NewServer(cfg, handlers, grpcConn, mkts, lendoraMkts, logger, dynamicTenants, sessionBearers), nil
 }

@@ -220,6 +220,49 @@ func TestLoadConfig_OracleAddress(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_LendoraComptrollerAddress(t *testing.T) {
+	comptroller := "0xAE351F2dF66DF1A7d2eB0D7574BcDb909E680B56"
+
+	// Top-level key — must precede the [cache]/[limits] table headers.
+	withTop := func(extra string) string { return extra + validConfigTOML }
+
+	t.Run("set with evm_rpc_url", func(t *testing.T) {
+		body := withTop("evm_rpc_url = \"http://127.0.0.1:8545\"\nevm_lendora_comptroller_addr = \"" + comptroller + "\"\n")
+		cfg, err := LoadConfig(writeTempConfig(t, body))
+		require.NoError(t, err)
+		require.Equal(t, comptroller, cfg.EVMLendoraComptrollerAddr)
+	})
+
+	t.Run("unset is fine", func(t *testing.T) {
+		_, err := LoadConfig(writeTempConfig(t, validConfigTOML))
+		require.NoError(t, err)
+	})
+
+	cases := []struct {
+		name        string
+		extra       string
+		expectError string
+	}{
+		{
+			"invalid address",
+			"evm_rpc_url = \"http://127.0.0.1:8545\"\nevm_lendora_comptroller_addr = \"0xnope\"\n",
+			"not a valid 0x address",
+		},
+		{
+			"set without evm_rpc_url",
+			"evm_lendora_comptroller_addr = \"" + comptroller + "\"\n",
+			"evm_rpc_url is required",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadConfig(writeTempConfig(t, withTop(tc.extra)))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.expectError)
+		})
+	}
+}
+
 func TestLoadConfig_BridgeAddresses(t *testing.T) {
 	addr := "0x78Aca10afd5b28E838ECf0De20c5621CE39D9F4a"
 	routes := "/tmp/routes.json"

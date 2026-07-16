@@ -56,6 +56,7 @@ func (m *mockOracleEVM) EstimateGas(context.Context, ethereum.CallMsg) (uint64, 
 func (m *mockOracleEVM) SuggestGasTipCap(context.Context) (*big.Int, error)            { return nil, nil }
 func (m *mockOracleEVM) BaseFee(context.Context) (*big.Int, error)                     { return nil, nil }
 func (m *mockOracleEVM) ChainID(context.Context) (*big.Int, error)                     { return nil, nil }
+func (m *mockOracleEVM) BlockNumber(context.Context) (uint64, error)                   { return 0, nil }
 func (m *mockOracleEVM) SendTransaction(context.Context, *ethtypes.Transaction) (string, error) {
 	return "", nil
 }

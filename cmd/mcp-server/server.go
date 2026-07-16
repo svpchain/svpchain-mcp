@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/lendora"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/tools"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/transport"
@@ -24,8 +25,11 @@ type Server struct {
 	mcpServer *mcp.Server
 	transport *transport.Server
 	markets   *markets.Cache
-	grpcConn  *grpc.ClientConn
-	logger    log.Logger
+	// lendoraMarkets is the EVM-sourced Lendora market cache. Nil when Lendora is
+	// not configured; Run skips its refresher then.
+	lendoraMarkets *lendora.Cache
+	grpcConn       *grpc.ClientConn
+	logger         log.Logger
 
 	// dynamicTenants is the only tenant source in v0.3 — populated on the
 	// fly by the auth_challenge → auth_verify flow. Bearers are looked
@@ -43,6 +47,7 @@ func NewServer(
 	handlers *tools.Handlers,
 	grpcConn *grpc.ClientConn,
 	mkts *markets.Cache,
+	lendoraMkts *lendora.Cache,
 	logger log.Logger,
 	dynamicTenants *auth.DynamicTenantStore,
 	sessionBearers *auth.SessionBearers,
@@ -57,6 +62,7 @@ func NewServer(
 		cfg:            cfg,
 		mcpServer:      mcpSrv,
 		markets:        mkts,
+		lendoraMarkets: lendoraMkts,
 		grpcConn:       grpcConn,
 		logger:         logger,
 		dynamicTenants: dynamicTenants,
@@ -108,6 +114,18 @@ func (s *Server) Run(ctx context.Context) error {
 		cacheDone <- s.markets.Run(ctx)
 	}()
 
+	// Lendora market cache: runs under the same lifecycle when Lendora is
+	// configured. Its initial refresh failing is fatal (the lendora_* tools
+	// cannot resolve assets without it); periodic errors are logged.
+	lendoraDone := make(chan error, 1)
+	if s.lendoraMarkets != nil {
+		go func() {
+			lendoraDone <- s.lendoraMarkets.Run(ctx)
+		}()
+	} else {
+		lendoraDone <- nil
+	}
+
 	// HTTP server.
 	httpDone := make(chan error, 1)
 	go func() {
@@ -131,6 +149,9 @@ func (s *Server) Run(ctx context.Context) error {
 	// markets.Run honors ctx.Done; wait for it to wind down.
 	if err := <-cacheDone; err != nil {
 		s.logger.Error("markets cache exited with error", "error", err)
+	}
+	if err := <-lendoraDone; err != nil {
+		s.logger.Error("lendora market cache exited with error", "error", err)
 	}
 	return nil
 }

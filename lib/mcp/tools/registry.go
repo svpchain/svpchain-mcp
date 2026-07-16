@@ -327,4 +327,75 @@ func registerEVMTools(srv *mcp.Server, h *Handlers) {
 		Name:        "build_erc721_set_approval_for_all",
 		Description: "Construct an ERC-721 setApprovalForAll(operator, approved) tx to grant (approved=true) or revoke (approved=false) operator control of your ENTIRE NFT collection in this contract. Returns an EVMTxPayload — pass to sign_evm_transaction then broadcast_evm_tx.",
 	}, h.BuildERC721SetApprovalForAll)
+
+	registerLendoraTools(srv, h)
+}
+
+// registerLendoraTools registers the lendora_* family (Compound V2 fork lending):
+// 7 read tools (markets, dashboard, account, risk) + 5 operation tools (supply /
+// withdraw / borrow / repay / collateral). Reads are pure eth_call; operations
+// return a simulation plus a signable EVMTxPayload (sign_evm_transaction →
+// broadcast_evm_tx), or an approval step / block per the risk guardrails.
+// asset is an underlying symbol ("USDC") or a market/underlying 0x address; all
+// require evm_lendora_comptroller_addr and refuse otherwise.
+func registerLendoraTools(srv *mcp.Server, h *Handlers) {
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "lendora_get_all_markets",
+		Description: "List every Lendora lending market with supply/borrow APY, total supply/borrow (USD when a price feed is configured), utilization, collateral factor, and mint/borrow pause flags. Read-only.",
+	}, h.LendoraGetAllMarkets)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "lendora_get_market_details",
+		Description: "Return one Lendora market's full stats (APY, TVL, utilization, collateral/reserve factors, cash, reserves, pauses) for an asset given as an underlying symbol (e.g. \"USDC\") or a 0x address. Read-only.",
+	}, h.LendoraGetMarketDetails)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "lendora_get_protocol_dashboard",
+		Description: "Return Lendora protocol-wide aggregates: market count and total supplied / borrowed / net liquidity in USD across all markets. Read-only.",
+	}, h.LendoraGetProtocolDashboard)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "lendora_get_account_summary",
+		Description: "Return an account's Lendora summary: total supplied/borrowed USD, health factor, risk level, and max borrowable. address is optional (omit for the session account). Read-only.",
+	}, h.LendoraGetAccountSummary)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "lendora_get_account_positions",
+		Description: "Return an account's per-market Lendora positions: supplied and borrowed amounts (underlying + USD) and which markets are enabled as collateral. address is optional. Read-only.",
+	}, h.LendoraGetAccountPositions)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "lendora_get_balances",
+		Description: "Return an account's Lendora-relevant balances: per-market wallet (underlying) and supplied (cToken) balances, plus the native SVP gas balance. address is optional. Read-only.",
+	}, h.LendoraGetBalances)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "lendora_assess_risk",
+		Description: "Assess an account's Lendora risk: health factor, risk level (Low/Medium/High/Critical), shortfall, max borrowable, and per-market breakdown, at the current block. address is optional. Read-only.",
+	}, h.LendoraAssessRisk)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "lendora_build_supply_tx",
+		Description: "Build a tx to SUPPLY (mint) an amount of an asset's underlying into its Lendora market. Returns a simulation plus a signable EVMTxPayload; if the market's underlying allowance is short, returns approval_required (call build_erc20_approve, then retry) instead. Sign with sign_evm_transaction then broadcast_evm_tx.",
+	}, h.LendoraBuildSupplyTx)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "lendora_build_withdraw_tx",
+		Description: "Build a tx to WITHDRAW (redeemUnderlying) an amount of an asset's underlying from its Lendora market. Simulates the result and BLOCKS if it would drop the health factor below 1.0. Returns a simulation + EVMTxPayload; sign then broadcast_evm_tx.",
+	}, h.LendoraBuildWithdrawTx)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "lendora_build_borrow_tx",
+		Description: "Build a tx to BORROW an amount of an asset's underlying from its Lendora market against your collateral. Simulates and BLOCKS if it would drop the health factor below 1.0. Returns a simulation + EVMTxPayload; sign then broadcast_evm_tx.",
+	}, h.LendoraBuildBorrowTx)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "lendora_build_repay_tx",
+		Description: "Build a tx to REPAY an amount of your borrow in an asset's Lendora market (amount must not exceed the outstanding debt). Returns a simulation + EVMTxPayload; if the underlying allowance is short, returns approval_required instead. Sign then broadcast_evm_tx.",
+	}, h.LendoraBuildRepayTx)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "lendora_build_collateral_tx",
+		Description: "Build a tx to ENABLE (enterMarkets) or DISABLE (exitMarket) an asset's Lendora market as collateral (action=\"enable\"|\"disable\"). Disabling that would drop the health factor below 1.0 is BLOCKED. Returns a simulation + EVMTxPayload; sign then broadcast_evm_tx.",
+	}, h.LendoraBuildCollateralTx)
 }

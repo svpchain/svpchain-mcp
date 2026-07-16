@@ -33,6 +33,10 @@ type EVMClient interface {
 	BaseFee(ctx context.Context) (*big.Int, error)
 	// ChainID returns the EVM chain id (svpchain default 262144).
 	ChainID(ctx context.Context) (*big.Int, error)
+	// BlockNumber returns the height of the latest block, used to stamp
+	// read-only reports (e.g. the Lendora risk/simulation "at block #X"
+	// annotation) with the block their eth_calls were answered against.
+	BlockNumber(ctx context.Context) (uint64, error)
 	// CallContract executes a read-only eth_call against the latest block.
 	CallContract(ctx context.Context, msg ethereum.CallMsg) ([]byte, error)
 	// SendTransaction submits an already-signed tx (eth_sendRawTransaction
@@ -81,6 +85,10 @@ func (c *evmClient) BaseFee(ctx context.Context) (*big.Int, error) {
 
 func (c *evmClient) ChainID(ctx context.Context) (*big.Int, error) {
 	return c.inner.ChainID(ctx)
+}
+
+func (c *evmClient) BlockNumber(ctx context.Context) (uint64, error) {
+	return c.inner.BlockNumber(ctx)
 }
 
 func (c *evmClient) CallContract(ctx context.Context, msg ethereum.CallMsg) ([]byte, error) {

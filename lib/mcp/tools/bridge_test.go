@@ -53,6 +53,7 @@ func (m *mockForeignEVM) SuggestGasTipCap(context.Context) (*big.Int, error) {
 func (m *mockForeignEVM) BaseFee(context.Context) (*big.Int, error) {
 	return big.NewInt(2_000_000_000), nil
 }
+func (m *mockForeignEVM) BlockNumber(context.Context) (uint64, error) { return 0, nil }
 func (m *mockForeignEVM) ChainID(context.Context) (*big.Int, error) {
 	return big.NewInt(m.chainID), nil
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/faucet"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
+	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/lendora"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/limits"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
 	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/policy"
@@ -48,6 +49,13 @@ type EVMDeps struct {
 	// deployment. Nil unless evm_oracle_addr is configured (which also requires
 	// evm_rpc_url); get_oracle_price checks it and refuses otherwise.
 	Oracle *builder.OracleFeed
+
+	// Lendora binds the lendora_* money-market tools to a Lendora (Compound V2
+	// fork) Comptroller deployment. Markets are resolved per-call (via
+	// LendoraMarkets); only the singleton Comptroller is bound here. Nil unless
+	// evm_lendora_comptroller_addr is configured (which also requires
+	// evm_rpc_url); the lendora tools check it (requireLendora) and refuse otherwise.
+	Lendora *builder.Lendora
 
 	// Bridge + BridgeRoutes back build_bridge_deposit: the SVPBridge contract
 	// binding and the (sourceToken, targetChainId -> targetToken) route registry.
@@ -104,6 +112,12 @@ type Deps struct {
 	Indexer *indexer.Client
 	Markets *markets.Cache
 	Builder *builder.Assembler
+
+	// LendoraMarkets resolves a Lendora asset (underlying symbol or 0x address)
+	// to its on-chain market metadata for the lendora_* tools. Nil unless
+	// evm_lendora_comptroller_addr is configured; the tools check it (requireLendora)
+	// and refuse otherwise.
+	LendoraMarkets *lendora.Cache
 
 	// Faucet is the HTTP client for the faucet backend (faucet_base_url).
 	// Nil when the server runs without faucet_base_url; the faucet tools
