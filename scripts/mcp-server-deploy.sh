@@ -58,6 +58,14 @@
 #                                  Defaults to the known deployment
 #                                  (0xAE351F2d…0B56); set "" to disable.
 #                                  SVPCHAIN_EVM_ORACLE
+#   --evm-lendora-comptroller <0xaddr>
+#                                  Lendora (Compound V2 fork) Comptroller
+#                                  address, enabling the lendora_* money-market
+#                                  tools. Requires --evm-rpc; markets + price
+#                                  oracle are discovered on-chain from it.
+#                                  Defaults to the svp_testnet deployment
+#                                  (0x0FAdfaA9…E02D); set "" to disable.
+#                                  SVPCHAIN_EVM_LENDORA_COMPTROLLER
 #   --evm-bridge-addr <0xaddr>     SVPBridge contract address, enabling
 #                                  build_bridge_deposit. Requires --evm-rpc.
 #                                  Bridge is ON by default; addr defaults to the
@@ -145,6 +153,12 @@ faucet_url="${SVPCHAIN_FAUCET_URL:-https://pre-faucet.svpchain.org}"
 evm_uniswap_router="${SVPCHAIN_EVM_UNISWAP_ROUTER:-0xFe7bf2DFd5CB268C6779f1F614638a436Cb701e4}"
 evm_wsvp="${SVPCHAIN_EVM_WSVP:-0x771a0a63D8198b7dbea4a16910ff68AB38006531}"
 evm_oracle="${SVPCHAIN_EVM_ORACLE:-0xAE351F2dF66DF1A7d2eB0D7574BcDb909E680B56}"
+# Lendora (Compound V2 fork) money markets: the singleton Comptroller (Unitroller
+# proxy) address enables the lendora_* tool family (config.go::validateLendora,
+# requires evm_rpc_url). Markets + the price oracle are discovered on-chain from
+# it, so only this address is needed. Defaults to the svp_testnet deployment
+# (networks/svptestnet.json). Set --evm-lendora-comptroller "" to disable.
+evm_lendora_comptroller="${SVPCHAIN_EVM_LENDORA_COMPTROLLER:-0x0FAdfaA907859DC4Cd5582dFd1CA4C761385E02D}"
 # Bridge is enabled by default: addr + source-chain-id default to the known
 # svp_chain deployment, and the route-registry path defaults to "routes.json"
 # (a path relative to mcp.toml — the server resolves it against the config dir,
@@ -199,6 +213,7 @@ while [[ $# -gt 0 ]]; do
     --evm-uniswap-router)     evm_uniswap_router="$2"; shift 2 ;;
     --evm-wsvp)               evm_wsvp="$2";          shift 2 ;;
     --evm-oracle)             evm_oracle="$2";        shift 2 ;;
+    --evm-lendora-comptroller) evm_lendora_comptroller="$2"; shift 2 ;;
     --evm-bridge-addr)        evm_bridge_addr="$2";   shift 2 ;;
     --evm-bridge-routes)      evm_bridge_routes="$2"; shift 2 ;;
     --evm-bridge-routes-src)  evm_bridge_routes_src="$2"; shift 2 ;;
@@ -289,6 +304,11 @@ EOF
   [[ -n "$evm_uniswap_router" ]] && echo "evm_uniswap_router_addr = \"${evm_uniswap_router}\""
   [[ -n "$evm_wsvp" ]]           && echo "evm_wsvp_addr           = \"${evm_wsvp}\""
   [[ -n "$evm_oracle" ]]         && echo "evm_oracle_addr         = \"${evm_oracle}\""
+  # Lendora Comptroller is standalone (config.go::validateLendora) and requires
+  # evm_rpc_url. Non-empty by default, so the lendora_* tools are enabled out of
+  # the box; --evm-lendora-comptroller "" disables them and the rest of the EVM
+  # family is unaffected.
+  [[ -n "$evm_lendora_comptroller" ]] && echo "evm_lendora_comptroller_addr = \"${evm_lendora_comptroller}\""
   # Bridge keys are all-or-nothing (config.go::validateBridge) and require
   # evm_rpc_url. All three default non-empty, so build_bridge_deposit is enabled
   # out of the box; --evm-bridge-routes "" (or clearing addr/source) disables it
