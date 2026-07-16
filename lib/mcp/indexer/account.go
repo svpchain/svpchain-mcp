@@ -32,5 +32,15 @@ func (c *Client) GetSubaccount(ctx context.Context, address string, number uint3
 	if err := c.get(ctx, path, nil, &sa); err != nil {
 		return nil, fmt.Errorf("GetSubaccount %s/%d: %w", address, number, err)
 	}
+	// Comlink sends null, not {}, for a position map that is empty. A nil map
+	// marshals back to null and fails the reflected output schema's
+	// "type":"object", so the tool call errors on any subaccount holding no
+	// positions. Normalize to an empty map.
+	if sa.OpenPerpetualPositions == nil {
+		sa.OpenPerpetualPositions = map[string]any{}
+	}
+	if sa.AssetPositions == nil {
+		sa.AssetPositions = map[string]any{}
+	}
 	return &sa, nil
 }
