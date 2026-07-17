@@ -259,7 +259,9 @@ func (h *Handlers) LendoraGetAllMarkets(
 	if err != nil {
 		return nil, LendoraGetAllMarketsOutput{}, err
 	}
-	out := LendoraGetAllMarketsOutput{BlockNumber: h.evmBlockNumber(ctx)}
+	// Non-nil so an empty result marshals to [] (a nil slice marshals to null,
+	// which fails the tool's "type":"array" output schema).
+	out := LendoraGetAllMarketsOutput{BlockNumber: h.evmBlockNumber(ctx), Markets: []MarketDTO{}}
 	for _, m := range h.Deps.LendoraMarkets.All() {
 		st, err := h.loadMarketStats(ctx, oracle, m)
 		if err != nil {
@@ -510,7 +512,7 @@ func (h *Handlers) LendoraGetAccountPositions(
 	if err != nil {
 		return nil, LendoraGetAccountPositionsOutput{}, err
 	}
-	out := LendoraGetAccountPositionsOutput{BlockNumber: r.BlockNumber, Owner: owner}
+	out := LendoraGetAccountPositionsOutput{BlockNumber: r.BlockNumber, Owner: owner, Positions: []PositionDTO{}}
 	for _, p := range r.Positions {
 		out.Positions = append(out.Positions, positionDTO(p))
 	}
@@ -555,7 +557,7 @@ func (h *Handlers) LendoraGetBalances(
 		return nil, LendoraGetBalancesOutput{}, err
 	}
 	lend := h.Deps.EVM.Lendora
-	out := LendoraGetBalancesOutput{BlockNumber: h.evmBlockNumber(ctx), Owner: owner, GasToken: h.nativeGasBalance(ctx, owner)}
+	out := LendoraGetBalancesOutput{BlockNumber: h.evmBlockNumber(ctx), Owner: owner, GasToken: h.nativeGasBalance(ctx, owner), Balances: []WalletBalanceDTO{}}
 
 	markets := h.Deps.LendoraMarkets.All()
 	sort.Slice(markets, func(i, j int) bool { return markets[i].Symbol < markets[j].Symbol })
@@ -683,6 +685,7 @@ func (h *Handlers) LendoraAssessRisk(
 		TotalSuppliedUSD: formatUSD(r.TotalSuppliedUSD),
 		TotalBorrowedUSD: formatUSD(r.TotalBorrowedUSD),
 		Shortfall:        r.ShortfallNat != nil && r.ShortfallNat.Sign() > 0,
+		Positions:        []PositionDTO{}, // non-nil so an empty result marshals to [] not null
 	}
 	if r.MaxBorrowableOK {
 		out.MaxBorrowableUSD = formatUSD(r.MaxBorrowableUSD)

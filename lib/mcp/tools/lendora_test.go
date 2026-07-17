@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"math/big"
 	"strings"
 	"testing"
@@ -65,6 +66,7 @@ type lendScenario struct {
 	hypoShort *big.Int
 	hypoLiq   *big.Int
 	borrowBal *big.Int // getAccountSnapshot borrow balance (underlying units)
+	cTokenBal *big.Int // getAccountSnapshot cToken balance (cToken units)
 	entered   bool     // whether getAssetsIn includes cUSDC
 }
 
@@ -80,6 +82,7 @@ func newLendScenario(t *testing.T) *lendScenario {
 		hypoShort: big.NewInt(0),
 		hypoLiq:   mustBig("50000000000000000000"), // 5e19
 		borrowBal: big.NewInt(100_000_000),         // 100 USDC debt
+		cTokenBal: mustBig("500000000000"),         // 5000 cUSDC supplied
 		entered:   true,
 	}
 	u := func(to common.Address, sig, typ string, v any) {
@@ -153,9 +156,9 @@ func (s *lendScenario) CallContract(_ context.Context, msg ethereum.CallMsg) ([]
 	case sel == common.Bytes2Hex(lendSel("getHypotheticalAccountLiquidity(address,address,uint256,uint256)")):
 		return mustPack([]string{"uint256", "uint256", "uint256"}, big.NewInt(0), s.hypoLiq, s.hypoShort), nil
 	case sel == common.Bytes2Hex(lendSel("getAccountSnapshot(address)")):
-		// (error, cTokenBalance 5000e8, borrowBalance, exchangeRate 2e16)
+		// (error, cTokenBalance, borrowBalance, exchangeRate 2e16)
 		return mustPack([]string{"uint256", "uint256", "uint256", "uint256"},
-			big.NewInt(0), mustBig("500000000000"), s.borrowBal, mustBig("20000000000000000")), nil
+			big.NewInt(0), s.cTokenBal, s.borrowBal, mustBig("20000000000000000")), nil
 	case sel == common.Bytes2Hex(lendSel("getAssetsIn(address)")):
 		if s.entered {
 			return mustPack([]string{"address[]"}, []common.Address{lendCUSDC}), nil
@@ -372,4 +375,39 @@ func TestLendoraBuildCollateralTx_DisableWithBorrowBlocked(t *testing.T) {
 	_, _, err := h.LendoraBuildCollateralTx(ctx, nil, LendoraCollateralInput{Asset: "USDC", Action: "disable", ClientID: "d1"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "outstanding borrow")
+}
+
+// TestLendoraReads_EmptyCollectionsAreNonNil guards the null-slice output-schema
+// bug: a nil slice marshals to JSON null, which fails the go-sdk's "type":"array"
+// output schema. An account/market set with no rows must marshal to [] not null.
+func TestLendoraReads_EmptyPositionsMarshalToArray(t *testing.T) {
+	s := newLendScenario(t)
+	s.cTokenBal = big.NewInt(0) // no supply
+	s.borrowBal = big.NewInt(0) // no borrow -> no position in any market
+	s.entered = false
+	// Also zero the wallet + cToken balances so get_balances is genuinely empty
+	// (it reports wallet holdings independent of Lendora positions).
+	s.ret[key(lendUSDC, "balanceOf(address)")] = mustPack([]string{"uint256"}, big.NewInt(0))
+	s.ret[key(lendCUSDC, "balanceOf(address)")] = mustPack([]string{"uint256"}, big.NewInt(0))
+	h, ctx := lendHandlers(t, s)
+
+	_, out, err := h.LendoraGetAccountPositions(ctx, nil, LendoraGetAccountPositionsInput{})
+	require.NoError(t, err)
+	require.NotNil(t, out.Positions, "must be non-nil so it marshals to [] not null")
+	require.Len(t, out.Positions, 0)
+	b, err := json.Marshal(out)
+	require.NoError(t, err)
+	require.Contains(t, string(b), `"positions":[]`)
+	require.NotContains(t, string(b), `"positions":null`)
+
+	_, risk, err := h.LendoraAssessRisk(ctx, nil, LendoraAssessRiskInput{})
+	require.NoError(t, err)
+	rb, _ := json.Marshal(risk)
+	require.Contains(t, string(rb), `"positions":[]`)
+
+	_, bal, err := h.LendoraGetBalances(ctx, nil, LendoraGetBalancesInput{})
+	require.NoError(t, err)
+	require.NotNil(t, bal.Balances)
+	bb, _ := json.Marshal(bal)
+	require.Contains(t, string(bb), `"balances":[]`)
 }
