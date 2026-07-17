@@ -22,25 +22,19 @@ type GetSubaccountInput struct {
 	SubaccountNumber uint32 `json:"subaccount_number"`
 }
 
-// GetSubaccountOutput carries the subaccount on success, or AuthRequired when the
-// caller is unauthenticated. Exactly one is set; Subaccount is a pointer so it is
-// omitted (not a null/empty object) in the auth-required case.
 type GetSubaccountOutput struct {
-	Subaccount   *indexer.Subaccount `json:"subaccount,omitempty"`
-	AuthRequired *AuthRequired       `json:"auth_required,omitempty"`
+	Subaccount indexer.Subaccount `json:"subaccount"`
 }
 
+// GetSubaccount fetches a committed subaccount snapshot from the indexer. Like
+// every tenant-scoped tool it authorizes first; an unauthenticated call is
+// short-circuited by the auth middleware into a soft auth_required result (see
+// authgate.go / mcp_auth.go), so the handler only runs once a tenant is resolved.
 func (h *Handlers) GetSubaccount(
 	ctx context.Context,
 	_ *mcp.CallToolRequest,
 	in GetSubaccountInput,
 ) (*mcp.CallToolResult, GetSubaccountOutput, error) {
-	// Degrade gracefully when unauthenticated: return an actionable auth_required
-	// step as a SUCCESSFUL result rather than ErrNoTenant, so an agent loop that
-	// aborts on tool failures can run the handshake and retry instead of breaking.
-	if _, ok := TenantFrom(ctx); !ok {
-		return nil, GetSubaccountOutput{AuthRequired: authRequired("get_subaccount")}, nil
-	}
 	tp, err := h.authorizeOwner(ctx, "get_subaccount", in.Address)
 	if err != nil {
 		return nil, GetSubaccountOutput{}, err
@@ -52,7 +46,7 @@ func (h *Handlers) GetSubaccount(
 	if err != nil {
 		return nil, GetSubaccountOutput{}, err
 	}
-	return nil, GetSubaccountOutput{Subaccount: sa}, nil
+	return nil, GetSubaccountOutput{Subaccount: *sa}, nil
 }
 
 // -- get_live_subaccount (chain) ----------------------------------------

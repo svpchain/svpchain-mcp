@@ -29,24 +29,3 @@ var ErrNoTenant = errors.New(
 func userErrf(format string, args ...any) error {
 	return fmt.Errorf(format, args...)
 }
-
-// AuthRequired is the structured "authenticate first" step a tool returns as a
-// SUCCESSFUL result (not an error) when the caller is unauthenticated. Returning
-// it instead of ErrNoTenant keeps an agent loop alive: the go-sdk surfaces an
-// error as CallToolResult{IsError:true}, which aborts agents that break out on a
-// tool failure, whereas this is a normal result the agent can act on and retry.
-type AuthRequired struct {
-	Authenticated bool   `json:"authenticated"` // always false here
-	Message       string `json:"message"`       // the handshake instructions (see ErrNoTenant)
-	RetryTool     string `json:"retry_tool"`    // the tool to call again once the handshake completes
-}
-
-// authRequired builds the AuthRequired step for retryTool, reusing the canonical
-// handshake instructions from ErrNoTenant so the wording stays in one place.
-func authRequired(retryTool string) *AuthRequired {
-	return &AuthRequired{
-		Authenticated: false,
-		Message:       ErrNoTenant.Error(),
-		RetryTool:     retryTool,
-	}
-}

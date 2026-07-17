@@ -39,33 +39,48 @@ func authReceivingMiddleware(
 ) mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-			extra := req.GetExtra()
-			if extra == nil || extra.Header == nil {
-				return next(ctx, method, req)
-			}
-			h := extra.Header
+			if extra := req.GetExtra(); extra != nil && extra.Header != nil {
+				h := extra.Header
 
-			if ip := h.Get(ipHeader); ip != "" {
-				ctx = tools.WithIP(ctx, ip)
-			}
-			sessionID := h.Get("Mcp-Session-Id")
-			if sessionID != "" {
-				ctx = tools.WithSessionID(ctx, sessionID)
-			}
+				if ip := h.Get(ipHeader); ip != "" {
+					ctx = tools.WithIP(ctx, ip)
+				}
+				sessionID := h.Get("Mcp-Session-Id")
+				if sessionID != "" {
+					ctx = tools.WithSessionID(ctx, sessionID)
+				}
 
-			// Path 1: explicit bearer.
-			var resolved bool
-			if token, found := strings.CutPrefix(h.Get("Authorization"), "Bearer "); found {
-				if tc, ok := lookup.LookupTenantByToken(token); ok {
-					ctx = tools.WithTenant(ctx, tc)
-					resolved = true
+				// Path 1: explicit bearer.
+				var resolved bool
+				if token, found := strings.CutPrefix(h.Get("Authorization"), "Bearer "); found {
+					if tc, ok := lookup.LookupTenantByToken(token); ok {
+						ctx = tools.WithTenant(ctx, tc)
+						resolved = true
+					}
+				}
+				// Path 2: fall back to session-bound bearer.
+				if !resolved && sessionID != "" && sessions != nil {
+					if bearer := sessions.Lookup(sessionID); bearer != "" {
+						if tc, ok := lookup.LookupTenantByToken(bearer); ok {
+							ctx = tools.WithTenant(ctx, tc)
+						}
+					}
 				}
 			}
-			// Path 2: fall back to session-bound bearer.
-			if !resolved && sessionID != "" && sessions != nil {
-				if bearer := sessions.Lookup(sessionID); bearer != "" {
-					if tc, ok := lookup.LookupTenantByToken(bearer); ok {
-						ctx = tools.WithTenant(ctx, tc)
+
+			// Auth gate: for an unauthenticated call to a tenant-scoped tool, return
+			// a soft auth_required result (a NON-error success carrying the handshake
+			// instructions) instead of letting the handler return ErrNoTenant. The
+			// go-sdk turns a handler error into CallToolResult{IsError:true}, which
+			// aborts agent loops that break out on tool failures; the soft result lets
+			// the agent authenticate and retry. Only tools/call is gated (tools/list,
+			// initialize, etc. stay open); the handshake tools are exempt via
+			// RequiresAuth. Runs after tenant resolution above, so an authenticated
+			// call (tenant on ctx) passes straight through to the handler.
+			if method == "tools/call" {
+				if ctr, ok := req.(*mcp.CallToolRequest); ok && ctr.Params != nil && tools.RequiresAuth(ctr.Params.Name) {
+					if _, authed := tools.TenantFrom(ctx); !authed {
+						return tools.AuthRequiredResult(), nil
 					}
 				}
 			}

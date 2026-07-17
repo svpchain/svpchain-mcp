@@ -76,7 +76,7 @@ func Register(srv *mcp.Server, h *Handlers) {
 	// B. Account / positions.
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "get_subaccount",
-		Description: "Fetch a subaccount snapshot from the indexer (committed state). If you are not authenticated this returns a successful result with an auth_required object (not an error): follow its message to run the auth_challenge → sign_challenge → auth_verify handshake, then retry.",
+		Description: "Fetch a subaccount snapshot from the indexer (committed state).",
 	}, h.GetSubaccount)
 
 	mcp.AddTool(srv, &mcp.Tool{

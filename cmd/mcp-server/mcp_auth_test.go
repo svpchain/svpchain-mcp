@@ -119,3 +119,69 @@ func TestAuthMiddleware_NilExtra_PassesThrough(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, tools.IPFrom(*seen))
 }
+
+// callReq builds a tools/call request for a named tool with the given headers.
+func callReq(name string, h http.Header) *mcp.CallToolRequest {
+	return &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Name: name},
+		Extra:  &mcp.RequestExtra{Header: h},
+	}
+}
+
+// TestAuthGate_UnauthenticatedGatedTool_ReturnsSoftAuthRequired verifies that an
+// unauthenticated tools/call to a tenant-scoped tool short-circuits into a
+// NON-error result (so an agent loop survives) and never reaches the handler.
+func TestAuthGate_UnauthenticatedGatedTool_ReturnsSoftAuthRequired(t *testing.T) {
+	mw := authReceivingMiddleware(fakeLookup{}, auth.NewSessionBearers(time.Hour, nil))
+	next, seen := captureNext()
+	res, err := mw(next)(context.Background(), "tools/call", callReq("get_subaccount", http.Header{}))
+
+	require.NoError(t, err)
+	require.Nil(t, *seen, "handler must NOT be reached when unauthenticated")
+	ctr, ok := res.(*mcp.CallToolResult)
+	require.True(t, ok)
+	require.False(t, ctr.IsError, "must be a soft (non-error) result so the agent loop continues")
+	require.Len(t, ctr.Content, 1)
+	txt, ok := ctr.Content[0].(*mcp.TextContent)
+	require.True(t, ok)
+	require.Contains(t, txt.Text, "authentication required")
+	require.Contains(t, txt.Text, "auth_challenge")
+}
+
+// TestAuthGate_AuthenticatedGatedTool_PassesThrough verifies an authenticated
+// call to a gated tool reaches the handler untouched.
+func TestAuthGate_AuthenticatedGatedTool_PassesThrough(t *testing.T) {
+	lookup := fakeLookup{tc: tools.TenantContext{TenantID: "t1", Owner: "svp1abc"}}
+	mw := authReceivingMiddleware(lookup, auth.NewSessionBearers(time.Hour, nil))
+	next, seen := captureNext()
+	h := http.Header{"Authorization": {"Bearer good"}}
+	_, err := mw(next)(context.Background(), "tools/call", callReq("get_subaccount", h))
+
+	require.NoError(t, err)
+	require.NotNil(t, *seen, "handler must run for an authenticated call")
+	tc, ok := tools.TenantFrom(*seen)
+	require.True(t, ok)
+	require.Equal(t, "t1", tc.TenantID)
+}
+
+// TestAuthGate_HandshakeToolsExempt verifies the auth handshake tools are NOT
+// gated even when unauthenticated (otherwise you could never log in).
+func TestAuthGate_HandshakeToolsExempt(t *testing.T) {
+	mw := authReceivingMiddleware(fakeLookup{}, auth.NewSessionBearers(time.Hour, nil))
+	for _, tool := range []string{"auth_challenge", "auth_verify"} {
+		next, seen := captureNext()
+		_, err := mw(next)(context.Background(), "tools/call", callReq(tool, http.Header{}))
+		require.NoError(t, err)
+		require.NotNil(t, *seen, "%s must reach the handler unauthenticated", tool)
+	}
+}
+
+// TestAuthGate_NonToolCallMethodsNotGated verifies non-tools/call methods (e.g.
+// tools/list) are never gated, so an agent can discover tools before auth.
+func TestAuthGate_NonToolCallMethodsNotGated(t *testing.T) {
+	mw := authReceivingMiddleware(fakeLookup{}, auth.NewSessionBearers(time.Hour, nil))
+	next, seen := captureNext()
+	_, err := mw(next)(context.Background(), "tools/list", buildReq(http.Header{}))
+	require.NoError(t, err)
+	require.NotNil(t, *seen, "tools/list must pass through unauthenticated")
+}
