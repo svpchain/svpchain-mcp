@@ -3,7 +3,7 @@
 `devsign` is a **dev-only** helper that signs a `TxPayload` produced by the
 remote `mcp-server` and emits a `SignedTx` ready to hand to
 `broadcast_signed_tx`. It plays the role the future local-signer MCP binary
-(`protocol/cmd/mcp-signer/`) will play, so we can exercise the
+(`cmd/mcp-signer/`) will play, so we can exercise the
 non-custodial `build → sign → broadcast → query` loop end-to-end before
 that binary lands.
 
@@ -18,7 +18,7 @@ Anywhere a real local signer would otherwise be required.
 ## Build
 
 ```sh
-GOPRIVATE='github.com/deltaping/*' go build -o build/devsign ./scripts/devsign
+go build -o build/devsign ./cmd/devsign
 ```
 
 ## Run

@@ -247,10 +247,10 @@ fi
 # ---- 2. build binaries -----------------------------------------------------
 
 step "Build mcp-server + devsign"
-GOPRIVATE='github.com/deltaping/*' go build -o build/mcp-server ./cmd/mcp-server >/dev/null \
+go build -o build/mcp-server ./cmd/mcp-server >/dev/null \
   || fail "build mcp-server"
 pass "build/mcp-server"
-GOPRIVATE='github.com/deltaping/*' go build -o build/devsign ./scripts/devsign >/dev/null \
+go build -o build/devsign ./cmd/devsign >/dev/null \
   || fail "build devsign"
 pass "build/devsign"
 
