@@ -28,5 +28,10 @@ func (c *Client) GetFills(ctx context.Context, address string, subaccountNumber 
 	if err := c.get(ctx, "/fills", q, &resp); err != nil {
 		return nil, fmt.Errorf("GetFills %s/%d: %w", address, subaccountNumber, err)
 	}
+	// A nil slice marshals to JSON null, which fails the MCP output schema's
+	// "type":"array" (Comlink returns null/omits the key when there are none).
+	if resp.Fills == nil {
+		resp.Fills = []map[string]any{}
+	}
 	return &resp, nil
 }

@@ -30,6 +30,11 @@ func (c *Client) GetPnl(ctx context.Context, address string, subaccountNumber ui
 	if err := c.get(ctx, "/pnl", q, &resp); err != nil {
 		return nil, fmt.Errorf("GetPnl %s/%d: %w", address, subaccountNumber, err)
 	}
+	// Non-nil so an empty (or HTTP-200 null) result marshals to [] not null; the
+	// handler's ErrNotFound guard only covers the 404 case.
+	if resp.HistoricalPnl == nil {
+		resp.HistoricalPnl = []map[string]any{}
+	}
 	return &resp, nil
 }
 
@@ -41,6 +46,11 @@ func (c *Client) GetHistoricalPnl(ctx context.Context, address string, subaccoun
 	var resp HistoricalPnlResponse
 	if err := c.get(ctx, "/historical-pnl", q, &resp); err != nil {
 		return nil, fmt.Errorf("GetHistoricalPnl %s/%d: %w", address, subaccountNumber, err)
+	}
+	// Non-nil so an empty (or HTTP-200 null) result marshals to [] not null; the
+	// handler's ErrNotFound guard only covers the 404 case.
+	if resp.HistoricalPnl == nil {
+		resp.HistoricalPnl = []map[string]any{}
 	}
 	return &resp, nil
 }

@@ -15,7 +15,7 @@ type HeightResponse struct {
 // TimeResponse mirrors Comlink's TimeResponse — the indexer's wall-clock
 // time, useful as a freshness sentinel.
 type TimeResponse struct {
-	ISO   string `json:"iso"`
+	ISO   string  `json:"iso"`
 	Epoch float64 `json:"epoch"` // seconds since 1970, with millisecond fraction
 }
 

@@ -23,5 +23,12 @@ func (c *Client) GetOrderbook(ctx context.Context, ticker string) (*Orderbook, e
 	if err := c.get(ctx, "/orderbooks/perpetualMarket/"+ticker, nil, &ob); err != nil {
 		return nil, fmt.Errorf("GetOrderbook %q: %w", ticker, err)
 	}
+	// Non-nil so an empty side marshals to [] not null (fails "type":"array").
+	if ob.Bids == nil {
+		ob.Bids = []OrderbookPriceLevel{}
+	}
+	if ob.Asks == nil {
+		ob.Asks = []OrderbookPriceLevel{}
+	}
 	return &ob, nil
 }

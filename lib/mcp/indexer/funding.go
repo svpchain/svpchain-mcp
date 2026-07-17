@@ -24,6 +24,10 @@ func (c *Client) GetHistoricalFunding(ctx context.Context, ticker string) (*Hist
 	if err := c.get(ctx, "/historicalFunding/"+ticker, nil, &resp); err != nil {
 		return nil, fmt.Errorf("GetHistoricalFunding %q: %w", ticker, err)
 	}
+	// Non-nil so an empty result marshals to [] not null (fails "type":"array").
+	if resp.HistoricalFunding == nil {
+		resp.HistoricalFunding = []map[string]any{}
+	}
 	return &resp, nil
 }
 
@@ -35,6 +39,10 @@ func (c *Client) GetFundingPayments(ctx context.Context, address string, subacco
 	var resp FundingPaymentsResponse
 	if err := c.get(ctx, "/fundingPayments", q, &resp); err != nil {
 		return nil, fmt.Errorf("GetFundingPayments %s/%d: %w", address, subaccountNumber, err)
+	}
+	// Non-nil so an empty result marshals to [] not null (fails "type":"array").
+	if resp.FundingPayments == nil {
+		resp.FundingPayments = []map[string]any{}
 	}
 	return &resp, nil
 }

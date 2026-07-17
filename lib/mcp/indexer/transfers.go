@@ -25,5 +25,9 @@ func (c *Client) GetTransfers(ctx context.Context, address string, subaccountNum
 	if err := c.get(ctx, "/transfers", q, &resp); err != nil {
 		return nil, fmt.Errorf("GetTransfers %s/%d: %w", address, subaccountNumber, err)
 	}
+	// Non-nil so an empty result marshals to [] not null (fails "type":"array").
+	if resp.Transfers == nil {
+		resp.Transfers = []map[string]any{}
+	}
 	return &resp, nil
 }

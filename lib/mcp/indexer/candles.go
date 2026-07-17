@@ -52,5 +52,9 @@ func (c *Client) GetCandles(ctx context.Context, ticker string, args GetCandlesA
 	if err := c.get(ctx, "/candles/perpetualMarkets/"+ticker, q, &resp); err != nil {
 		return nil, fmt.Errorf("GetCandles %q: %w", ticker, err)
 	}
+	// Non-nil so an empty result marshals to [] not null (fails "type":"array").
+	if resp.Candles == nil {
+		resp.Candles = []map[string]any{}
+	}
 	return &resp, nil
 }

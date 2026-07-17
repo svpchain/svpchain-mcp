@@ -21,5 +21,15 @@ func (c *Client) GetSparklines(ctx context.Context, timePeriod string) (Sparklin
 	if err := c.get(ctx, "/sparklines", q, &resp); err != nil {
 		return nil, fmt.Errorf("GetSparklines: %w", err)
 	}
+	// Non-nil map so an empty result marshals to {} not null; and non-nil value
+	// slices so a per-ticker null marshals to [] — both fail the reflected schema.
+	if resp == nil {
+		resp = SparklinesResponse{}
+	}
+	for k, v := range resp {
+		if v == nil {
+			resp[k] = []string{}
+		}
+	}
 	return resp, nil
 }

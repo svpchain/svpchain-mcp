@@ -50,6 +50,10 @@ func (c *Client) ListPerpetualMarkets(ctx context.Context) (*PerpetualMarketsRes
 	if err := c.get(ctx, "/perpetualMarkets", nil, &resp); err != nil {
 		return nil, fmt.Errorf("ListPerpetualMarkets: %w", err)
 	}
+	// Non-nil so an empty map marshals to {} not null (fails "type":"object").
+	if resp.Markets == nil {
+		resp.Markets = map[string]PerpetualMarket{}
+	}
 	return &resp, nil
 }
 
