@@ -13,7 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/builder"
 )
 
 // mockBalanceEVM is a chain.EVMClient stub for the erc20Balances path: only

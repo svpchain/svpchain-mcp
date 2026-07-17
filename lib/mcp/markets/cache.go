@@ -9,7 +9,7 @@ import (
 
 	"cosmossdk.io/log"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/chain"
 )
 
 // MarketMeta is the per-market constant set that every build_* tool path

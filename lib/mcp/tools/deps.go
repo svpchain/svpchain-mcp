@@ -4,16 +4,16 @@ import (
 	"cosmossdk.io/log"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/bridge"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/faucet"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/lendora"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/limits"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/policy"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/auth"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/bridge"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/builder"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/chain"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/faucet"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/indexer"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/lendora"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/limits"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/markets"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/policy"
 )
 
 // ChainDeps groups the gRPC clients used by tool handlers.

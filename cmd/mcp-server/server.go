@@ -10,11 +10,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/grpc"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/lendora"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/tools"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/transport"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/auth"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/lendora"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/markets"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/tools"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/transport"
 )
 
 // Server owns the runtime: the MCP server instance, the HTTP transport,

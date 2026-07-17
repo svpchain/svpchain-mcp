@@ -9,7 +9,7 @@ import (
 
 	// testOwner, newTestAsm, and the app/config blank-import live in
 	// testutil_test.go (same package).
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/builder"
 	assettypes "github.com/dydxprotocol/v4-chain/protocol/x/assets/types"
 )
 

@@ -618,6 +618,10 @@ if [[ "$skip_build" == "1" ]]; then
   info "--skip-build: reusing existing local image $image_ref"
   [[ -n "$(local_image_id "$image_ref")" ]] || fail "image $image_ref not found locally; drop --skip-build"
 else
+  # The image builds from a vendored dependency tree (see cmd/mcp-server/Dockerfile):
+  # this repo depends on the protocol module via a go.mod replace to a sibling
+  # checkout that is not inside the Docker build context, so vendor it in first.
+  run_or_print "go mod vendor"
   build_cmd="docker build --platform $platform"
   build_cmd+=" --build-arg VERSION=$image_tag"
   build_cmd+=" --build-arg COMMIT=$(git rev-parse HEAD 2>/dev/null || echo unknown)"

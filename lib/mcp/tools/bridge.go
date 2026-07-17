@@ -8,10 +8,10 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/bridge"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/bridge"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/builder"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/chain"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/payload"
 )
 
 // bridge.go is the SVPBridge cross-chain deposit tool family. Bridging is

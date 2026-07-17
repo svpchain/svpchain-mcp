@@ -1,0 +1,16 @@
+# build output
+/build/
+
+# vendored deps (materialized on demand for hermetic Docker builds via
+# `make vendor`; see Dockerfile). Not committed — it is large and fully
+# derivable from go.mod + the sibling protocol checkout.
+/vendor/
+
+# local runtime config (operator-supplied; never committed)
+mcp.toml
+
+# dev
+**/.DS_Store
+.aider*
+.idea
+.vscode

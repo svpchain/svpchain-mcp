@@ -8,7 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/builder"
 )
 
 var testBridgeAddr = common.HexToAddress("0x78Aca10afd5b28E838ECf0De20c5621CE39D9F4a")

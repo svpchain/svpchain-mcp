@@ -7,8 +7,8 @@ import (
 	"github.com/cosmos/evm/crypto/ethsecp256k1"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/signer"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/auth"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/signer"
 )
 
 func newRandomPriv(t *testing.T) *ethsecp256k1.PrivKey {

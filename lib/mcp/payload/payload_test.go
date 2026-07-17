@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/payload"
 	"github.com/stretchr/testify/require"
 )
 

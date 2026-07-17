@@ -10,7 +10,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/indexer"
 	assettypes "github.com/dydxprotocol/v4-chain/protocol/x/assets/types"
 	satypes "github.com/dydxprotocol/v4-chain/protocol/x/subaccounts/types"
 )

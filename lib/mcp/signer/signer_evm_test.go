@@ -11,8 +11,8 @@ import (
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/signer"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/payload"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/signer"
 )
 
 // ethAddrOf derives the 0x address of an eth_secp256k1 key the same way SignEVM

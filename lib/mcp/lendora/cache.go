@@ -18,8 +18,8 @@ import (
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/builder"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/chain"
 )
 
 // Market is the per-market constant set the lendora_* tools resolve an asset to.

@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/limits"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/limits"
 )
 
 // dtoFor returns the DTO for a symbol from a view slice.

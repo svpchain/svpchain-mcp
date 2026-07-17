@@ -9,10 +9,18 @@
 # svpchaind, not mcp-server) so deploy churn on either binary doesn't
 # bust the other's layer cache.
 #
-# Build from the repo root:
+# Build from the repo root. The image builds from a VENDORED dependency tree
+# (`./vendor`) so the build context is self-contained: this repo depends on the
+# protocol module via a go.mod `replace` to a sibling checkout that is NOT
+# inside the Docker context, so a non-vendored build could not resolve it.
+# Vendoring also removes the need for GOPRIVATE credentials in the builder.
+#
+# Vendor first, then build:
+#   go mod vendor
 #   docker build --platform linux/amd64 \
 #     -t svpchain-mcp:<tag> \
 #     -f cmd/mcp-server/Dockerfile .
+# Or just `make docker`, which runs `go mod vendor` for you.
 #
 # --platform linux/amd64 is required when building on Apple Silicon for a
 # linux/amd64 remote; see scripts/mcp-server-deploy.sh for the deploy flow.
@@ -29,21 +37,12 @@ FROM golang@sha256:${GOLANG_1_23_ALPINE_DIGEST} AS builder
 
 RUN set -eux; apk add --no-cache ca-certificates build-base; apk add git linux-headers bash binutils-gold
 
-# GOPRIVATE points the go toolchain at the deltaping private fork. The
-# builder image needs network credentials to fetch from it; pass them
-# via --build-arg or --secret at build time. See project memory
-# `project_deltaping_sdk_fork` for context.
-ENV GOPRIVATE=github.com/deltaping/*
-
 WORKDIR /svpchain
 
-# Download go dependencies (cached separately from the source copy so
-# `go mod download` doesn't re-run on every code change).
-COPY go.* ./
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/root/go/pkg/mod \
-    go mod download
-
+# The build is fully vendored (see header): all dependencies — including the
+# protocol module resolved through go.mod's replace — are copied in via
+# `./vendor`, so there is no `go mod download` step and no GOPRIVATE / network
+# fetch. `go build -mod=vendor` (below) uses the vendored tree exclusively.
 COPY . .
 
 # VERSION/COMMIT are declared HERE, not at the top of the stage, for
@@ -62,7 +61,7 @@ ARG COMMIT
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/go/pkg/mod \
     go build \
-      -mod=readonly \
+      -mod=vendor \
       -tags "netgo,muslc" \
       -ldflags "-X github.com/cosmos/cosmos-sdk/version.Name=svpchain \
               -X github.com/cosmos/cosmos-sdk/version.AppName=svpchain-mcp \

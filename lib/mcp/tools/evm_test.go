@@ -10,7 +10,7 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/policy"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/policy"
 )
 
 // The svp bech32 prefix is configured by app's init (imported via

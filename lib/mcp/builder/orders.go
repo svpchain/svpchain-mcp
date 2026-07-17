@@ -5,9 +5,9 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/units"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/markets"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/payload"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/units"
 	clobtypes "github.com/dydxprotocol/v4-chain/protocol/x/clob/types"
 	satypes "github.com/dydxprotocol/v4-chain/protocol/x/subaccounts/types"
 )

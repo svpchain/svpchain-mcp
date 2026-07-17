@@ -7,7 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/builder"
 )
 
 var (

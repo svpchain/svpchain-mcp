@@ -6,7 +6,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/faucet"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/faucet"
 )
 
 // faucet.go holds the HTTP faucet tools. Unlike the EVM build_* tools, these

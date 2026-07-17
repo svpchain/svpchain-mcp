@@ -6,8 +6,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/builder"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/payload"
 )
 
 // v0.2.2 write-side handlers: market, conditional, cancel, batch_cancel.

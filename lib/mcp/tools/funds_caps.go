@@ -9,7 +9,7 @@ import (
 	sdkmath "cosmossdk.io/math"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/limits"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/limits"
 )
 
 // These two tools let an agent read and set the per-symbol daily transfer-out

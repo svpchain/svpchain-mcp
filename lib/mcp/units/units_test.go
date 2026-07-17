@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/units"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/markets"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/units"
 )
 
 // btcMeta mirrors a typical BTC-USD perp on svpchain: AtomicResolution=-10,

@@ -3,7 +3,7 @@ package tools
 import (
 	"context"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/policy"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/policy"
 )
 
 // authorize is the base auth prelude every tool handler runs: extract the

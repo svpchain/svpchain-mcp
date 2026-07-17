@@ -9,9 +9,9 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/builder"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/chain"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/payload"
 )
 
 // erc.go is the generic ERC-20 / ERC-721 build_* family: transfer / approve /

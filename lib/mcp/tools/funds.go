@@ -8,9 +8,9 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/limits"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/builder"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/limits"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/payload"
 )
 
 // -- build_deposit_to_subaccount ---------------------------------------

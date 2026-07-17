@@ -9,7 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/builder"
 )
 
 var testOracleAddr = common.HexToAddress("0xAE351F2dF66DF1A7d2eB0D7574BcDb909E680B56")

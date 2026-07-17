@@ -6,8 +6,8 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/limits"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/limits"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/payload"
 	assettypes "github.com/dydxprotocol/v4-chain/protocol/x/assets/types"
 	sendingtypes "github.com/dydxprotocol/v4-chain/protocol/x/sending/types"
 	satypes "github.com/dydxprotocol/v4-chain/protocol/x/subaccounts/types"

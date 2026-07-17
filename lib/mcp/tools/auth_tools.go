@@ -8,7 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/auth"
 )
 
 // auth_challenge and auth_verify are the two tools that DO NOT require

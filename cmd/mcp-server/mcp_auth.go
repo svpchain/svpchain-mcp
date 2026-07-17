@@ -6,8 +6,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/tools"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/auth"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/tools"
 )
 
 // authReceivingMiddleware resolves tenant identity per request. It runs

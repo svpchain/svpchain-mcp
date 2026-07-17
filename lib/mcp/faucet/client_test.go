@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/faucet"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/faucet"
 )
 
 func TestEnabledTokens(t *testing.T) {

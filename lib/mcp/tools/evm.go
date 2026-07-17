@@ -14,8 +14,8 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/policy"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/payload"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/policy"
 )
 
 // This file holds the EVM tool family. The two tools below are

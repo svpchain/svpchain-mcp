@@ -9,7 +9,7 @@ import (
 	"cosmossdk.io/log"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/markets"
 	clobtypes "github.com/dydxprotocol/v4-chain/protocol/x/clob/types"
 	perptypes "github.com/dydxprotocol/v4-chain/protocol/x/perpetuals/types"
 )

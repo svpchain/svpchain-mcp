@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/indexer"
 )
 
 // v0.2.1 read-catalog extensions. Tools that need a per-owner check stay

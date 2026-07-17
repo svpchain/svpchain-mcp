@@ -7,7 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/bridge"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/bridge"
 )
 
 const svpChainID = uint64(2517)

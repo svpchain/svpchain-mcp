@@ -5,7 +5,7 @@ import (
 	"math/big"
 
 	"github.com/dydxprotocol/v4-chain/protocol/lib"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/markets"
 )
 
 // SizeToQuantums converts a human-readable base-currency size (e.g. "0.05" BTC)

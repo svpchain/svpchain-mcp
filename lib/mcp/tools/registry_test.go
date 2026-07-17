@@ -6,7 +6,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/tools"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/tools"
 )
 
 // TestRegister_NoSchemaPanic catches the failure mode where a jsonschema

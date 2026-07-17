@@ -11,7 +11,7 @@ import (
 	txtypes "github.com/cosmos/cosmos-sdk/types/tx"
 	"github.com/cosmos/gogoproto/proto"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/payload"
 )
 
 // ClobGasLimit is the gas limit set on CLOB-msg txs. svpchain CLOB msgs

@@ -1,0 +1,6 @@
+# Keep the build context lean. NOTE: vendor/ is intentionally NOT ignored —
+# the image builds with -mod=vendor and needs it (see cmd/mcp-server/Dockerfile).
+.git
+/build
+mcp.toml
+**/.DS_Store

@@ -11,8 +11,8 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/chain"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/payload"
 )
 
 // Gas estimates can be slightly tight (and the contract's gas use can shift

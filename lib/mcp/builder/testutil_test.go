@@ -8,7 +8,7 @@ import (
 	// address or SubaccountId. Single point of registration here so each
 	// _test.go file in this package doesn't need its own copy.
 	_ "github.com/dydxprotocol/v4-chain/protocol/app/config"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/builder"
 )
 
 // testOwner is a real bech32 address used as the tenant owner across

@@ -9,8 +9,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/tools"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/auth"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/tools"
 )
 
 // fakeLookup is a tenantLookup test double — bearer "good" resolves

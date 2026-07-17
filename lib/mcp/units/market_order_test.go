@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/units"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/units"
 )
 
 // Reuses btcMeta() from units_test.go (same package units_test):

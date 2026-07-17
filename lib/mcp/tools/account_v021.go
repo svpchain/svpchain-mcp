@@ -6,7 +6,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/indexer"
 )
 
 // v0.2.1 owner-scoped read extensions. Every handler validates the

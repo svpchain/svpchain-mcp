@@ -10,7 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/lendora"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/lendora"
 )
 
 // lendora_read.go holds the seven read-only lendora_* query tools: market data

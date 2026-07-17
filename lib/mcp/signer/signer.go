@@ -20,7 +20,7 @@ import (
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 
 	appconfig "github.com/dydxprotocol/v4-chain/protocol/app/config"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/payload"
 )
 
 func init() {

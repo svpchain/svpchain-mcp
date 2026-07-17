@@ -10,19 +10,19 @@ import (
 	"cosmossdk.io/log"
 	"github.com/ethereum/go-ethereum/common"
 
-	"github.com/dydxprotocol/v4-chain/protocol/app"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/auth"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/bridge"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/builder"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/faucet"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/indexer"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/lendora"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/limits"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/logging"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/markets"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/policy"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/tools"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/auth"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/bridge"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/builder"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/chain"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/faucet"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/indexer"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/lendora"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/limits"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/logging"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/markets"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/mcpcodec"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/policy"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/tools"
 )
 
 // dynamicTenantAdapter wraps auth.DynamicTenantStore to satisfy
@@ -56,7 +56,7 @@ func BuildServer(ctx context.Context, cfg *Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dial chain gRPC: %w", err)
 	}
-	encCfg := app.GetEncodingConfig()
+	encCfg := mcpcodec.GetEncodingConfig()
 
 	chainDeps := tools.ChainDeps{
 		Account:         chain.NewAccountClient(grpcConn, encCfg.InterfaceRegistry),

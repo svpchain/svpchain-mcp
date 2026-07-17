@@ -14,10 +14,10 @@ import (
 	"github.com/cosmos/gogoproto/proto"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/chain"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/limits"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/policy"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/chain"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/limits"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/payload"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/policy"
 	assettypes "github.com/dydxprotocol/v4-chain/protocol/x/assets/types"
 	sendingtypes "github.com/dydxprotocol/v4-chain/protocol/x/sending/types"
 )

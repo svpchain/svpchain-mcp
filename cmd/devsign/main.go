@@ -8,8 +8,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/payload"
-	"github.com/dydxprotocol/v4-chain/protocol/lib/mcp/signer"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/payload"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/signer"
 )
 
 // devsign is a thin one-shot CLI wrapper around lib/mcp/signer. Reads a

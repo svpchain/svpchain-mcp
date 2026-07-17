@@ -11,10 +11,11 @@ import (
 	"github.com/cosmos/gogoproto/proto"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dydxprotocol/v4-chain/protocol/app"
 	assettypes "github.com/dydxprotocol/v4-chain/protocol/x/assets/types"
 	sendingtypes "github.com/dydxprotocol/v4-chain/protocol/x/sending/types"
 	satypes "github.com/dydxprotocol/v4-chain/protocol/x/subaccounts/types"
+
+	"github.com/svpchain/svpchain-mcp/lib/mcp/mcpcodec"
 )
 
 // Owner is reused across the test cases below; bech32 validity matters
@@ -41,7 +42,7 @@ func txRawWith(t *testing.T, msgs ...proto.Message) []byte {
 }
 
 func TestExtractWithdrawQuantums(t *testing.T) {
-	reg := app.GetEncodingConfig().InterfaceRegistry
+	reg := mcpcodec.GetEncodingConfig().InterfaceRegistry
 
 	t.Run("no withdraw — total is 0", func(t *testing.T) {
 		// An empty TxBody should produce no withdraws.
@@ -98,7 +99,7 @@ func TestExtractWithdrawQuantums(t *testing.T) {
 }
 
 func TestExtractBankSends(t *testing.T) {
-	reg := app.GetEncodingConfig().InterfaceRegistry
+	reg := mcpcodec.GetEncodingConfig().InterfaceRegistry
 	// A distinct, valid bech32 address to play sender/recipient roles.
 	otherAddr := sdk.AccAddress(make([]byte, 20)).String()
 
