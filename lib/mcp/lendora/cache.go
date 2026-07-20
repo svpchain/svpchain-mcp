@@ -115,12 +115,7 @@ func (c *Cache) Refresh(ctx context.Context) error {
 
 	// cEtherAddress identifies the native market (which has no ERC-20 underlying);
 	// a zero/absent value simply means there is no native market to special-case.
-	var cEther common.Address
-	if data, err := c.lend.PackCEtherAddress(); err == nil {
-		if out, err := c.call(ctx, oracleAddr, data); err == nil {
-			cEther, _ = c.lend.UnpackOracleAddress("cEtherAddress", out)
-		}
-	}
+	cEther := c.resolveCEther(ctx, oracleAddr)
 
 	marketsData, err := c.lend.PackGetAllMarkets()
 	if err != nil {
@@ -162,6 +157,25 @@ func (c *Cache) Refresh(ctx context.Context) error {
 	c.oracleSet = true
 	c.mu.Unlock()
 	return nil
+}
+
+// resolveCEther reads the price oracle's cEtherAddress(). A zero result (unset,
+// unpackable, or a failed call) simply means no native market to special-case —
+// every non-native cToken is then read as CErc20, which is correct.
+func (c *Cache) resolveCEther(ctx context.Context, oracleAddr common.Address) common.Address {
+	if oracleAddr == (common.Address{}) {
+		return common.Address{}
+	}
+	data, err := c.lend.PackCEtherAddress()
+	if err != nil {
+		return common.Address{}
+	}
+	out, err := c.call(ctx, oracleAddr, data)
+	if err != nil {
+		return common.Address{}
+	}
+	cEther, _ := c.lend.UnpackOracleAddress("cEtherAddress", out)
+	return cEther
 }
 
 // loadMarket reads one cToken's metadata. The native (cSVP) market has no
@@ -258,10 +272,12 @@ func (c *Cache) Resolve(asset string) (Market, bool) {
 // LoadMarket reads a single market's metadata on demand (bypassing the cache),
 // for a cToken address the periodic refresh has not captured yet — a fresh
 // listing or a market dropped by a transient refresh error. ok=false when the
-// address is not a readable CErc20 market. Native detection is skipped (callers
-// resolving an address get a CErc20 view); the result is not cached.
+// address is not a readable market. Native detection uses the last-refreshed
+// oracle address, so the native (cSVP/cEther) cToken resolves correctly here too
+// (it has no underlying() to read); the result is not cached.
 func (c *Cache) LoadMarket(ctx context.Context, cToken common.Address) (Market, bool) {
-	m, err := c.loadMarket(ctx, cToken, common.Address{})
+	oracleAddr, _ := c.Oracle()
+	m, err := c.loadMarket(ctx, cToken, c.resolveCEther(ctx, oracleAddr))
 	if err != nil {
 		return Market{}, false
 	}

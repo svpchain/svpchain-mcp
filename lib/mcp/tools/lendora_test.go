@@ -17,6 +17,7 @@ import (
 
 	"github.com/svpchain/svpchain-mcp/lib/mcp/builder"
 	"github.com/svpchain/svpchain-mcp/lib/mcp/lendora"
+	"github.com/svpchain/svpchain-mcp/lib/mcp/payload"
 	"github.com/svpchain/svpchain-mcp/lib/mcp/policy"
 )
 
@@ -31,6 +32,7 @@ var (
 	lendIRM    = common.HexToAddress("0x0000000000000000000000000000000000000012")
 	lendCUSDC  = common.HexToAddress("0x00000000000000000000000000000000000000c1")
 	lendUSDC   = common.HexToAddress("0x0000000000000000000000000000000000000011")
+	lendCSVP   = common.HexToAddress("0x00000000000000000000000000000000000000c5") // native (cSVP) market
 )
 
 // mustPack ABI-encodes vals against the given solidity type list — used to build
@@ -143,6 +145,53 @@ func mustBig(s string) *big.Int {
 		panic("bad big: " + s)
 	}
 	return v
+}
+
+// withNativeMarket adds a native (cSVP) market to a scenario: getAllMarkets grows
+// to [cUSDC, cSVP], the oracle's cEtherAddress() points at cSVP, and cSVP answers
+// the per-cToken reads — but deliberately NOT underlying(), which reverts on a
+// real CEther and must never be read for the native market. Returns s for chaining.
+func withNativeMarket(t *testing.T, s *lendScenario) *lendScenario {
+	t.Helper()
+	u := func(to common.Address, sig, typ string, v any) {
+		s.ret[key(to, sig)] = abiPackTypes(t, []string{typ}, v)
+	}
+	s.ret[key(lendComp, "getAllMarkets()")] = abiPackTypes(t, []string{"address[]"}, []common.Address{lendCUSDC, lendCSVP})
+	u(lendOracle, "cEtherAddress()", "address", lendCSVP)
+
+	u(lendCSVP, "decimals()", "uint8", uint8(8))
+	u(lendCSVP, "symbol()", "string", "cSVP")
+	u(lendCSVP, "exchangeRateStored()", "uint256", mustBig("20000000000000000")) // 2e16
+	u(lendCSVP, "supplyRatePerBlock()", "uint256", big.NewInt(1_000_000_000))
+	u(lendCSVP, "borrowRatePerBlock()", "uint256", big.NewInt(2_000_000_000))
+	u(lendCSVP, "getCash()", "uint256", mustBig("1000000000000000000000")) // 1000 SVP
+	u(lendCSVP, "totalBorrows()", "uint256", mustBig("100000000000000000000"))
+	u(lendCSVP, "totalReserves()", "uint256", big.NewInt(0))
+	u(lendCSVP, "reserveFactorMantissa()", "uint256", mustBig("100000000000000000"))
+	u(lendCSVP, "interestRateModel()", "address", lendIRM)
+	u(lendCSVP, "balanceOf(address)", "uint256", mustBig("500000000000"))
+	return s
+}
+
+// lendHandlersNative wires a *Handlers whose cache holds both the cUSDC and the
+// native cSVP market.
+func lendHandlersNative(t *testing.T, s *lendScenario) (*Handlers, context.Context) {
+	t.Helper()
+	lend, err := builder.NewLendora(lendComp)
+	require.NoError(t, err)
+	cache := lendora.NewCache(s, lend, 0, log.NewNopLogger())
+	require.NoError(t, cache.Refresh(context.Background()))
+	require.Equal(t, 2, cache.Size())
+
+	h := &Handlers{Deps: Deps{
+		Chain:          ChainDeps{EVM: s},
+		EVM:            EVMDeps{Assembler: builder.NewEVMAssembler(s), Lendora: lend},
+		LendoraMarkets: cache,
+		Policy:         policy.NewEngine([]policy.TenantPolicy{{TenantID: "t1", Owner: testTxOwner}}),
+		RateLimit:      policy.NewRateLimiter(0, 0),
+	}}
+	ctx := WithTenant(context.Background(), TenantContext{TenantID: "t1", Owner: testTxOwner})
+	return h, ctx
 }
 
 func (s *lendScenario) CallContract(_ context.Context, msg ethereum.CallMsg) ([]byte, error) {
@@ -410,4 +459,81 @@ func TestLendoraReads_EmptyPositionsMarshalToArray(t *testing.T) {
 	require.NotNil(t, bal.Balances)
 	bb, _ := json.Marshal(bal)
 	require.Contains(t, string(bb), `"balances":[]`)
+}
+
+// -- native (cSVP) market -----------------------------------------------
+
+// firstSel returns the 4-byte selector of a built payload's calldata.
+func firstSel(t *testing.T, p *payload.EVMTxPayload) string {
+	t.Helper()
+	require.NotNil(t, p)
+	return common.Bytes2Hex(common.FromHex(p.Data)[:4])
+}
+
+// The native market surfaces its is_native flag so a client can tell it apart
+// from a CErc20 market whose only other distinguishing hint is a zero underlying.
+func TestLendoraGetAllMarkets_NativeFlag(t *testing.T) {
+	h, ctx := lendHandlersNative(t, withNativeMarket(t, newLendScenario(t)))
+	_, out, err := h.LendoraGetAllMarkets(ctx, nil, LendoraGetAllMarketsInput{})
+	require.NoError(t, err)
+	var svp, usdc *MarketDTO
+	for i := range out.Markets {
+		switch out.Markets[i].Symbol {
+		case "SVP":
+			svp = &out.Markets[i]
+		case "USDC":
+			usdc = &out.Markets[i]
+		}
+	}
+	require.NotNil(t, svp, "native SVP market present")
+	require.True(t, svp.IsNative)
+	require.NotNil(t, usdc)
+	require.False(t, usdc.IsNative)
+}
+
+// borrow/withdraw/collateral use CEther-identical calldata and no msg.value, so
+// they build against the native market unchanged once the gate is narrowed.
+func TestLendoraBuildBorrowTx_Native(t *testing.T) {
+	h, ctx := lendHandlersNative(t, withNativeMarket(t, newLendScenario(t)))
+	_, out, err := h.LendoraBuildBorrowTx(ctx, nil, LendoraBorrowInput{Asset: "SVP", Amount: "1", ClientID: "nb1"})
+	require.NoError(t, err)
+	require.Equal(t, lendCSVP.Hex(), out.Payload.To)
+	require.Equal(t, common.Bytes2Hex(lendSel("borrow(uint256)")), firstSel(t, out.Payload))
+	require.Equal(t, "0", out.Payload.Value, "borrow is not payable")
+}
+
+func TestLendoraBuildWithdrawTx_Native(t *testing.T) {
+	h, ctx := lendHandlersNative(t, withNativeMarket(t, newLendScenario(t)))
+	_, out, err := h.LendoraBuildWithdrawTx(ctx, nil, LendoraWithdrawInput{Asset: "SVP", Full: true, ClientID: "nw1"})
+	require.NoError(t, err)
+	require.Equal(t, lendCSVP.Hex(), out.Payload.To)
+	require.Equal(t, common.Bytes2Hex(lendSel("redeem(uint256)")), firstSel(t, out.Payload))
+	require.Equal(t, "0", out.Payload.Value, "withdraw is not payable")
+}
+
+func TestLendoraBuildCollateralTx_Native(t *testing.T) {
+	h, ctx := lendHandlersNative(t, withNativeMarket(t, newLendScenario(t)))
+	_, out, err := h.LendoraBuildCollateralTx(ctx, nil, LendoraCollateralInput{Asset: "SVP", Action: "enable", ClientID: "nc1"})
+	require.NoError(t, err)
+	require.Equal(t, lendComp.Hex(), out.Payload.To)
+	require.Equal(t, common.Bytes2Hex(lendSel("enterMarkets(address[])")), firstSel(t, out.Payload))
+	require.Equal(t, "0", out.Payload.Value)
+}
+
+// supply/repay still refuse the native market — their payable no-arg CEther forms
+// are out of scope — with a message naming the market, not the whole family.
+func TestLendoraBuildSupplyTx_NativeRefused(t *testing.T) {
+	h, ctx := lendHandlersNative(t, withNativeMarket(t, newLendScenario(t)))
+	_, _, err := h.LendoraBuildSupplyTx(ctx, nil, LendoraSupplyInput{Asset: "SVP", Amount: "1", ClientID: "ns1"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "SVP")
+	require.Contains(t, err.Error(), "not supported yet")
+}
+
+func TestLendoraBuildRepayTx_NativeRefused(t *testing.T) {
+	h, ctx := lendHandlersNative(t, withNativeMarket(t, newLendScenario(t)))
+	_, _, err := h.LendoraBuildRepayTx(ctx, nil, LendoraRepayInput{Asset: "SVP", Amount: "1", ClientID: "nr1"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "SVP")
+	require.Contains(t, err.Error(), "not supported yet")
 }

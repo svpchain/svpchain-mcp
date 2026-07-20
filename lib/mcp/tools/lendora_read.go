@@ -28,6 +28,7 @@ type marketStats struct {
 	CToken                common.Address
 	Underlying            common.Address
 	UnderlyingDecimals    int64
+	IsCEther              bool
 	SupplyAPY             math.LegacyDec
 	BorrowAPY             math.LegacyDec
 	TotalSupplyUnderlying *big.Int
@@ -52,6 +53,7 @@ func (h *Handlers) loadMarketStats(ctx context.Context, oracle common.Address, m
 		CToken:             m.CToken,
 		Underlying:         m.Underlying,
 		UnderlyingDecimals: m.UnderlyingDecimals,
+		IsCEther:           m.IsCEther,
 		SupplyAPY:          math.LegacyZeroDec(),
 		BorrowAPY:          math.LegacyZeroDec(),
 		Utilization:        math.LegacyZeroDec(),
@@ -211,6 +213,7 @@ type MarketDTO struct {
 	CollateralFactor string `json:"collateral_factor"` // e.g. "80.00%"
 	MintPaused       bool   `json:"mint_paused"`
 	BorrowPaused     bool   `json:"borrow_paused"`
+	IsNative         bool   `json:"is_native"` // the native (cSVP) market; underlying is the zero address
 }
 
 func (h *Handlers) marketDTO(st marketStats) MarketDTO {
@@ -226,6 +229,7 @@ func (h *Handlers) marketDTO(st marketStats) MarketDTO {
 		CollateralFactor: formatPercent(st.CollateralFactor),
 		MintPaused:       st.MintPaused,
 		BorrowPaused:     st.BorrowPaused,
+		IsNative:         st.IsCEther,
 	}
 	if st.FeedOK {
 		dto.TotalSupplyUSD = formatUSD(st.SupplyUSD)
@@ -413,6 +417,7 @@ type PositionDTO struct {
 	SuppliedUSD       string `json:"supplied_usd"` // "$…" or ""
 	BorrowedUSD       string `json:"borrowed_usd"` // "$…" or ""
 	CollateralEnabled bool   `json:"collateral_enabled"`
+	IsNative          bool   `json:"is_native"` // the native (cSVP) market
 }
 
 func positionDTO(p marketPosition) PositionDTO {
@@ -422,6 +427,7 @@ func positionDTO(p marketPosition) PositionDTO {
 		Supplied:          humanAmount(math.NewIntFromBigInt(p.SuppliedUnderlying), p.UnderlyingDecimals),
 		Borrowed:          humanAmount(math.NewIntFromBigInt(p.BorrowedUnderlying), p.UnderlyingDecimals),
 		CollateralEnabled: p.CollateralEnabled,
+		IsNative:          p.IsCEther,
 	}
 	if p.FeedOK {
 		dto.SuppliedUSD = formatUSD(p.SuppliedUSD)

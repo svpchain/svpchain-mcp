@@ -69,6 +69,16 @@ func projectHF(postCollateral, postBorrow *big.Int) (hfStr, level, emoji string,
 	return hf.String(), level, emoji, warn
 }
 
+// nativeUnsupportedOps maps the lendora_build_* tools that cannot yet target the
+// native (cSVP/cEther) market to the human verb used in their refusal message.
+// CEther's mint()/repayBorrow() are payable and take no amount argument, so the
+// amount-arg + ERC-20 allowance path these two ops use would build a reverting
+// tx. The remaining ops (borrow/withdraw/collateral) are CEther-agnostic.
+var nativeUnsupportedOps = map[string]string{
+	"lendora_build_supply_tx": "supplying",
+	"lendora_build_repay_tx":  "repaying",
+}
+
 // opCommon authorizes, guards, resolves the asset + session owner, and returns
 // the current risk snapshot every operation starts from.
 func (h *Handlers) opCommon(ctx context.Context, tool, asset string) (owner common.Address, ownerBech string, m lendoraMarketRef, r riskResult, err error) {
@@ -83,12 +93,16 @@ func (h *Handlers) opCommon(ctx context.Context, tool, asset string) (owner comm
 	if e != nil {
 		return common.Address{}, "", lendoraMarketRef{}, riskResult{}, e
 	}
-	// The lendora_build_* ops target CErc20 markets only. The native (cSVP/cEther)
-	// market has a payable no-arg mint()/repayBorrow() and no ERC-20 underlying, so
-	// this file's amount-arg / allowance path would build a reverting tx — refuse it.
+	// Only supply/repay are CErc20-only: CEther's mint()/repayBorrow() are payable
+	// and take no amount arg, so this file's amount-arg + ERC-20 allowance path
+	// would build a reverting tx against the native market. borrow/redeem/
+	// redeemUnderlying and the Comptroller's enterMarkets/exitMarket are identical
+	// on CEther, so those ops work against the native market unchanged.
 	if mk.IsCEther {
-		return common.Address{}, "", lendoraMarketRef{}, riskResult{},
-			userErrf("%s is the native SVP market; lendora_build_* operations support CErc20 markets only", mk.Symbol)
+		if verb, blocked := nativeUnsupportedOps[tool]; blocked {
+			return common.Address{}, "", lendoraMarketRef{}, riskResult{},
+				userErrf("%s %s is not supported yet: %s is the native market and its cToken takes a value rather than an amount argument — borrowing, withdrawing, and enabling/disabling collateral do work on %s", verb, mk.Symbol, mk.Symbol, mk.Symbol)
+		}
 	}
 	eth, e := ownerEthAddress(tp.Owner)
 	if e != nil {

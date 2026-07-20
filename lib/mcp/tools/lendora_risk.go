@@ -35,6 +35,7 @@ type marketPosition struct {
 	Symbol             string
 	CToken             common.Address
 	UnderlyingDecimals int64
+	IsCEther           bool
 	CollateralEnabled  bool
 	SuppliedUnderlying *big.Int // underlying base units
 	BorrowedUnderlying *big.Int // underlying base units
@@ -147,6 +148,7 @@ func (h *Handlers) computeRisk(ctx context.Context, owner common.Address) (riskR
 			Symbol:             m.Symbol,
 			CToken:             m.CToken,
 			UnderlyingDecimals: m.UnderlyingDecimals,
+			IsCEther:           m.IsCEther,
 			CollateralEnabled:  entered[m.CToken],
 			SuppliedUnderlying: suppliedUnderlying,
 			BorrowedUnderlying: borrowedUnderlying,

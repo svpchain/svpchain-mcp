@@ -23,6 +23,7 @@ var (
 	oracle = common.HexToAddress("0x000000000000000000000000000000000000000a")
 	cUSDC  = common.HexToAddress("0x00000000000000000000000000000000000000c1")
 	usdc   = common.HexToAddress("0x0000000000000000000000000000000000000011")
+	cSVP   = common.HexToAddress("0x00000000000000000000000000000000000000c5")
 )
 
 func sel(sig string) string { return common.Bytes2Hex(crypto.Keccak256([]byte(sig))[:4]) }
@@ -57,6 +58,20 @@ func newMock(t *testing.T) *mockEVM {
 	put(usdc, "decimals()", pack(t, []string{"uint8"}, uint8(6)))
 	put(usdc, "symbol()", pack(t, []string{"string"}, "USDC"))
 	return m
+}
+
+// put registers a raw return for (to, sig) on the mock.
+func (m *mockEVM) put(t *testing.T, to common.Address, sig string, types []string, vals ...any) {
+	m.ret[strings.ToLower(to.Hex())+":"+sel(sig)] = pack(t, types, vals...)
+}
+
+// addNativeCToken wires a native (cSVP) cToken: it answers decimals()/symbol()
+// but deliberately has NO underlying() — reading it is the failure mode the
+// native branch must avoid. cEtherAddress() points the oracle at it.
+func (m *mockEVM) addNativeCToken(t *testing.T) {
+	m.put(t, oracle, "cEtherAddress()", []string{"address"}, cSVP)
+	m.put(t, cSVP, "decimals()", []string{"uint8"}, uint8(8))
+	m.put(t, cSVP, "symbol()", []string{"string"}, "cSVP")
 }
 
 func (m *mockEVM) CallContract(_ context.Context, msg ethereum.CallMsg) ([]byte, error) {
@@ -104,4 +119,56 @@ func TestCache_RefreshAndResolve(t *testing.T) {
 	addr, ok := c.Oracle()
 	require.True(t, ok)
 	require.Equal(t, oracle, addr)
+}
+
+// TestCache_NativeMarketRefresh: when getAllMarkets lists the cEther cToken, the
+// refresh marks it native (zero underlying, 18-dec) and keys it by symbol and
+// cToken address only — never by the zero underlying address.
+func TestCache_NativeMarketRefresh(t *testing.T) {
+	m := newMock(t)
+	m.put(t, comp, "getAllMarkets()", []string{"address[]"}, []common.Address{cUSDC, cSVP})
+	m.addNativeCToken(t)
+
+	lend, err := builder.NewLendora(comp)
+	require.NoError(t, err)
+	c := lendora.NewCache(m, lend, 0, log.NewNopLogger())
+	require.NoError(t, c.Refresh(context.Background()))
+	require.Equal(t, 2, c.Size())
+
+	for _, asset := range []string{"SVP", "svp", cSVP.Hex()} {
+		mk, ok := c.Resolve(asset)
+		require.True(t, ok, asset)
+		require.Equal(t, "SVP", mk.Symbol)
+		require.Equal(t, cSVP, mk.CToken)
+		require.Equal(t, common.Address{}, mk.Underlying)
+		require.Equal(t, int64(18), mk.UnderlyingDecimals)
+		require.True(t, mk.IsCEther)
+	}
+
+	// The zero underlying address must not resolve to the native market.
+	_, ok := c.Resolve(common.Address{}.Hex())
+	require.False(t, ok)
+}
+
+// TestCache_LoadMarketDetectsNative guards the on-demand fallback: a cEther
+// cToken NOT captured by the periodic refresh must still resolve as native via
+// LoadMarket, rather than reverting on the underlying() it does not have.
+func TestCache_LoadMarketDetectsNative(t *testing.T) {
+	m := newMock(t) // getAllMarkets lists only cUSDC — cSVP is "fresh"/uncached
+	m.addNativeCToken(t)
+
+	lend, err := builder.NewLendora(comp)
+	require.NoError(t, err)
+	c := lendora.NewCache(m, lend, 0, log.NewNopLogger())
+	require.NoError(t, c.Refresh(context.Background()))
+	require.Equal(t, 1, c.Size())
+
+	_, ok := c.Resolve(cSVP.Hex())
+	require.False(t, ok, "cSVP is not in the refreshed cache")
+
+	mk, ok := c.LoadMarket(context.Background(), cSVP)
+	require.True(t, ok, "on-demand load must detect the native market")
+	require.True(t, mk.IsCEther)
+	require.Equal(t, "SVP", mk.Symbol)
+	require.Equal(t, common.Address{}, mk.Underlying)
 }
