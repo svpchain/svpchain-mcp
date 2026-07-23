@@ -158,7 +158,7 @@ evm_oracle="${SVPCHAIN_EVM_ORACLE:-0xAE351F2dF66DF1A7d2eB0D7574BcDb909E680B56}"
 # requires evm_rpc_url). Markets + the price oracle are discovered on-chain from
 # it, so only this address is needed. Defaults to the svp_testnet deployment
 # (networks/svptestnet.json). Set --evm-lendora-comptroller "" to disable.
-evm_lendora_comptroller="${SVPCHAIN_EVM_LENDORA_COMPTROLLER:-0x0FAdfaA907859DC4Cd5582dFd1CA4C761385E02D}"
+evm_lendora_comptroller="${SVPCHAIN_EVM_LENDORA_COMPTROLLER:-0x0faBb2B5057b14224b04E4cbB217Dd6b275f75a7}"
 # Bridge is enabled by default: addr + source-chain-id default to the known
 # svp_chain deployment, and the route-registry path defaults to "routes.json"
 # (a path relative to mcp.toml — the server resolves it against the config dir,
